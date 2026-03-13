@@ -1,0 +1,60 @@
+# InjecAgent GRPO Training Configuration
+# Usage: accelerate launch -m train --benchmark injecagent --config_file configs/injecagent.yaml
+
+# Dataset
+dataset: data/injecagent/dataset/train.json   # Path to InjecAgent JSON training file
+tools_path: data/injecagent/tools.json
+
+# Prompt Strategy
+prompt_strategy: recent_update     # 'default' or 'recent_update'
+format_prompt: true
+
+# Attacker Model
+attacker_model_name_or_path: Qwen/Qwen3-4B-Instruct-2507
+
+# Target Models (semicolon-separated for multiple; / in name = vLLM, else API)
+target_model_name_or_path: checkpoints/Meta-SecAlign-8B-merged
+target_model_url: http://localhost:8000/v1
+
+# Optional: OpenAI/Azure API config for API target models
+# target_openai_config: configs/openai.yaml
+
+# Reward
+reward_functions:
+  - InjecAgentToolCallingReward
+soft_rewards: true
+model_wise_reward_weights: null    # null = equal weight; list for per-model weights
+reasoning_effort: minimal
+
+# Generation (GRPO rollout)
+max_completion_length: 512
+target_model_max_completion_length: 512
+target_model_temperature: null     # null = use default
+num_generations: 15
+temperature: 1.0
+
+# Training
+output_dir: checkpoints/injecagent
+per_device_train_batch_size: 10
+gradient_accumulation_steps: 2
+learning_rate: 1.0e-5
+num_train_epochs: 10
+seed: 42
+save_steps: 100
+save_total_limit: 2
+logging_steps: 1
+bf16: true
+max_grad_norm: 1.0
+loss_type: grpo
+epsilon: 0.5
+beta: 0.0
+warmup_ratio: 0.03
+lr_scheduler_type: constant_with_warmup
+gradient_checkpointing: true
+
+# Adaptive Trainer (optional)
+adaptive: true
+
+# W&B Logging
+report_to: wandb
+run_name: injecagent_secalign

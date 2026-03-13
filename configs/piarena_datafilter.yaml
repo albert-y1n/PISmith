@@ -1,0 +1,60 @@
+# PIArena GRPO Training — DataFilter Defense
+# Target: standard LLM protected by DataFilter
+# Usage: accelerate launch -m train --benchmark piarena --config_file configs/piarena_datafilter.yaml
+
+# Dataset
+dataset_path: data/piarena
+dataset_split: dolly_closed_qa
+train_start_idx: 0
+train_end_idx: 100
+attack_template: recent_update
+format_prompt: true
+
+# Attacker Model
+attacker_model_name_or_path: Qwen/Qwen3-4B-Instruct-2507
+
+# Target Model (vLLM, protected by DataFilter)
+target_model_name_or_path: Qwen/Qwen3-4B-Instruct-2507
+target_model_url: http://localhost:8000/v1
+defense_method: datafilter
+
+# Judge Model
+judge_model_config: configs/judge.yaml
+
+# Attack
+inject_position: mid
+format_prompt: true
+
+# Reward
+target_model_max_tokens: 1024
+target_model_temperature: 0.0
+
+# Generation (GRPO rollout)
+max_completion_length: 512
+num_generations: 15
+temperature: 1.0
+
+# Training
+output_dir: checkpoints/piarena_datafilter
+per_device_train_batch_size: 10
+gradient_accumulation_steps: 2
+learning_rate: 1.0e-5
+num_train_epochs: 10
+seed: 42
+save_steps: 50
+save_total_limit: 2
+logging_steps: 1
+bf16: true
+max_grad_norm: 1.0
+loss_type: grpo
+epsilon: 0.2
+beta: 0.0
+warmup_ratio: 0.03
+lr_scheduler_type: constant_with_warmup
+gradient_checkpointing: true
+
+adaptive: true
+
+# W&B Logging
+report_to: wandb
+run_name: piarena_datafilter

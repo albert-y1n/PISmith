@@ -1,0 +1,19 @@
+# Accelerate configuration for multi-GPU GRPO training (3 training GPUs)
+# GPU layout: GPU 0 = vLLM target server, GPUs 1,2,3 = training
+# Usage: CUDA_VISIBLE_DEVICES=1,2,3 accelerate launch --config_file configs/accelerate.yaml ...
+
+compute_environment: LOCAL_MACHINE
+debug: false
+distributed_type: MULTI_GPU
+downcast_bf16: "no"
+enable_cpu_affinity: false
+main_training_function: main
+mixed_precision: bf16
+num_machines: 1
+num_processes: 3
+rdzv_backend: static
+same_network: true
+tpu_env: []
+tpu_use_cluster: false
+tpu_use_sudo: false
+use_cpu: false

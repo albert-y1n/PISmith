@@ -1,0 +1,81 @@
+# PIArena Joint GRPO Training — Meta-SecAlign-8B + Llama-3.1-8B-Instruct
+#
+# Joint training: attack two target models simultaneously.
+# Reward structure:
+#   - Only SecAlign attacked successfully : 0.7
+#   - Only Llama attacked successfully    : 0.3
+#   - Both attacked successfully          : 1.0
+#   - Neither                             : 0.0
+#
+# No KL divergence penalty (beta=0.0).
+# Only uses recent_update strategy + ATTACK_TEMPLATES_FORMATTED["recent_update"].
+#
+# Usage:
+#   accelerate launch -m train --benchmark piarena \
+#       --config_file configs/piarena_joint.yaml
+
+# Dataset
+dataset_path: data/piarena
+dataset_split: dolly_closed_qa
+train_start_idx: 0
+train_end_idx: 100
+attack_template: recent_update
+format_prompt: true
+
+# Attacker Model
+attacker_model_name_or_path: Qwen/Qwen3-4B-Instruct-2507
+
+# Primary Target: Meta-SecAlign-8B (served on port 8010)
+target_model_name_or_path: checkpoints/Meta-SecAlign-8B-merged
+target_model_url: http://localhost:8010/v1
+defense_method: secalign
+
+# Secondary Target: Llama-3.1-8B-Instruct (served on port 8011)
+target_model_name_or_path_2: meta-llama/Llama-3.1-8B-Instruct
+target_model_url_2: http://localhost:8011/v1
+
+# Joint Training Settings
+joint: true
+joint_reward_secalign: 0.7   # reward when only SecAlign is fooled
+joint_reward_llama: 0.3       # reward when only Llama is fooled
+joint_reward_both: 1.0         # reward when both are fooled
+
+# Judge Model
+judge_model_config: configs/judge.yaml
+
+# Attack
+inject_position: mid
+
+# Reward
+target_model_max_tokens: 1024
+target_model_temperature: 0.0
+
+# Generation (GRPO rollout)
+max_completion_length: 512
+num_generations: 15
+temperature: 1.0
+
+# Training — no KL divergence (beta=0.0)
+output_dir: checkpoints/piarena_joint
+per_device_train_batch_size: 10
+gradient_accumulation_steps: 2
+learning_rate: 1.0e-5
+num_train_epochs: 10
+seed: 42
+save_steps: 100
+save_total_limit: 2
+logging_steps: 1
+bf16: true
+max_grad_norm: 1.0
+loss_type: grpo
+epsilon: 0.2
+beta: 0.0
+warmup_ratio: 0.03
+lr_scheduler_type: constant_with_warmup
+gradient_checkpointing: true
+
+adaptive: false
+
+# W&B Logging
+report_to: wandb
+run_name: piarena_joint

@@ -1,0 +1,5 @@
+# Judge model configuration — OpenAI gpt-4o-mini
+default:
+  - model: "gpt-4o-mini"
+    api_key: ""   # set OPENAI_API_KEY env var or put key here
+

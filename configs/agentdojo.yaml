@@ -1,0 +1,58 @@
+# Training Suites
+train_suites: workspace            # comma-separated: workspace, banking, travel, slack
+# eval_suites: null                # null = no held-out eval dataset
+train_injection_tasks: injection_task_0,injection_task_1,injection_task_2,injection_task_3,injection_task_4,injection_task_5,injection_task_6
+# eval_injection_tasks: null       # null = all injection tasks in eval suite
+# train_user_tasks: null           # null = all user tasks in the suite
+# eval_user_tasks: null            # null = all user tasks in eval suite
+
+# Benchmark Version
+benchmark_version: v1.2.2
+
+format_prompt: true
+
+# Attacker Model
+attacker_model_name_or_path: Qwen/Qwen3-4B-Instruct-2507
+
+# Target Model (the agent being attacked)
+target_model: gpt-4o-mini  # ModelsEnum value or 'local'/'vllm_parsed'
+# target_model_id: meta-llama/Llama-3.1-8B-Instruct   # for local vLLM target
+# target_model_url: http://localhost:8000/v1           # for local vLLM target
+# target_defense: null             # AgentDojo defense method (e.g. 'tool_filter')
+
+# Reward
+reward_functions:
+  - AgentDojoAttackReward
+soft_rewards: false
+eval_max_workers: 16
+
+# Generation (GRPO rollout)
+max_completion_length: 512
+num_generations: 16  # must divide generation_batch_size = per_device_train_batch_size * gradient_accumulation_steps * num_gpus
+temperature: 1.0
+
+# Training
+output_dir: checkpoints/agentdojo
+per_device_train_batch_size: 10
+gradient_accumulation_steps: 2
+learning_rate: 1.0e-5
+num_train_epochs: 10
+seed: 42
+save_steps: 100
+save_total_limit: 2
+logging_steps: 1
+bf16: true
+max_grad_norm: 1.0
+loss_type: grpo
+epsilon: 0.5
+beta: 0.0
+warmup_ratio: 0.02
+lr_scheduler_type: constant_with_warmup
+gradient_checkpointing: true
+
+# Adaptive Trainer
+adaptive: true
+
+# W&B Logging
+report_to: wandb
+run_name: agentdojo
