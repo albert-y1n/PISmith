@@ -1,6 +1,6 @@
 # PISmith: Reinforcement Learning-based Red Teaming for Prompt Injection Defenses
 
-This is an official implementation of **PISmith: Reinforcement Learning-based Red Teaming for Prompt Injection Defenses**
+This is an official implementation of [**PISmith: Reinforcement Learning-based Red Teaming for Prompt Injection Defenses**](https://arxiv.org/abs/2603.13026)
 
 ---
 
