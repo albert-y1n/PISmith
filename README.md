@@ -129,20 +129,20 @@ cd AgentDyn
 pip install -e . --no-deps
 ```
 
-Training supports AgentDyn suites such as `workspace`, `github`, `dailylife`, and `shopping`.
+Training supports AgentDyn suites such as `github`, `dailylife`, and `shopping`.
 
 ```bash
 bash scripts/train_agentdyn.sh [target_type] [suites] [train_gpus]
 
-# Example: GPT-5-nano target on all AgentDyn suites
-bash scripts/train_agentdyn.sh gpt5-nano all "0,1,2,3"
+# Example
+bash scripts/train_agentdyn.sh gpt5-nano github "0,1,2,3"
 ```
 
 Evaluation reports both pass@k and sample-level average ASR, and supports data-parallel attacker vLLM serving:
 
 ```bash
 ATTACKER_GPUS=0,1,2,3 ATTACKER_DP_SIZE=4 \
-bash scripts/eval_agentdyn.sh checkpoints/agentdyn/checkpoint-500 gpt5-nano "workspace,github,dailylife,shopping" 5
+bash scripts/eval_agentdyn.sh checkpoints/agentdyn/checkpoint-500 gpt5-nano "github,dailylife,shopping" 5
 ```
 
 ---
