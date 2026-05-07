@@ -94,7 +94,7 @@ bash scripts/eval_piarena.sh checkpoints/piarena_none/checkpoint-500 piguard
 
 ### [AgentDojo](https://github.com/ethz-spylab/agentdojo)
 
-Supports GPT-4o-mini, GPT-4o, and local vLLM targets.
+Supports GPT-4o-mini, GPT-4o, GPT-5-nano, and local vLLM targets.
 
 ```bash
 bash scripts/train_agentdojo.sh [target_type] [suites] [train_gpus]
@@ -115,6 +115,34 @@ bash scripts/eval_agentdojo.sh <checkpoint> [target_type] [eval_suites] [num_sam
 
 # Example
 bash scripts/eval_agentdojo.sh checkpoints/agentdojo/checkpoint-500 gpt4o-mini
+```
+
+---
+
+### [AgentDyn](https://github.com/SaFo-Lab/AgentDyn)
+
+AgentDyn is built on top of AgentDojo. Install it separately before running AgentDyn experiments:
+
+```bash
+git clone https://github.com/SaFo-Lab/AgentDyn.git
+cd AgentDyn
+pip install -e . --no-deps
+```
+
+Training supports AgentDyn suites such as `workspace`, `github`, `dailylife`, and `shopping`.
+
+```bash
+bash scripts/train_agentdyn.sh [target_type] [suites] [train_gpus]
+
+# Example: GPT-5-nano target on all AgentDyn suites
+bash scripts/train_agentdyn.sh gpt5-nano all "0,1,2,3"
+```
+
+Evaluation reports both pass@k and sample-level average ASR, and supports data-parallel attacker vLLM serving:
+
+```bash
+ATTACKER_GPUS=0,1,2,3 ATTACKER_DP_SIZE=4 \
+bash scripts/eval_agentdyn.sh checkpoints/agentdyn/checkpoint-500 gpt5-nano "workspace,github,dailylife,shopping" 5
 ```
 
 ---

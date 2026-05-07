@@ -1,5 +1,8 @@
 accelerate==1.11.0
 agentdojo==0.1.35
+# AgentDyn is not packaged on PyPI. Install it after cloning:
+#   git clone https://github.com/SaFo-Lab/AgentDyn.git
+#   cd AgentDyn && pip install -e . --no-deps
 aiofiles==24.1.0
 aiohappyeyeballs==2.6.1
 aiohttp==3.12.15
@@ -306,4 +309,3 @@ xxhash==3.6.0
 yarl==1.20.1
 zipp==3.23.0
 zstandard==0.25.0
-

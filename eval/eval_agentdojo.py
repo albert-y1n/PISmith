@@ -49,13 +49,12 @@ from agentdojo.task_suite.load_suites import get_suite
 from agentdojo.agent_pipeline.agent_pipeline import AgentPipeline, PipelineConfig
 from agentdojo.logging import NullLogger, TraceLogger, LOGGER_STACK
 
-from benchmarks.agentdojo.reward import _resolve_agentdojo_model, extract_injection_text
-from benchmarks.agentdojo.dataset import (
-    AgentDojoDataset,
-    compute_injection_candidates,
-    format_attacker_prompt,
-    get_injection_vector_descriptions,
+from benchmarks.agentdojo.reward import (
+    _resolve_agentdojo_model,
+    extract_injection_text,
+    sanitize_injection_text_for_yaml,
 )
+from benchmarks.agentdojo.dataset import AgentDojoDataset
 from core.utils import set_random_seed
 
 
@@ -172,13 +171,16 @@ def evaluate_agentdojo(
     output_dir: str = "eval_results",
     logdir: Optional[str] = None,
     seed: int = 42,
+    benchmark_label: str = "AgentDojo",
+    benchmark_slug: str = "agentdojo",
+    dataset_cls=AgentDojoDataset,
 ):
     """Evaluate attacker model on AgentDojo benchmark."""
     set_random_seed(seed)
     os.makedirs(output_dir, exist_ok=True)
 
     print("=" * 70)
-    print("AgentDojo Evaluation")
+    print(f"{benchmark_label} Evaluation")
     print("=" * 70)
     print(f"  Attacker model: {attacker_model}")
     print(f"  Target model: {target_model}")
@@ -211,7 +213,7 @@ def evaluate_agentdojo(
 
     # Load evaluation dataset
     print("\nLoading evaluation dataset...")
-    eval_dataset = AgentDojoDataset(
+    eval_dataset = dataset_cls(
         suites=eval_suites,
         benchmark_version=benchmark_version,
         user_tasks=eval_user_tasks,
@@ -289,7 +291,7 @@ def evaluate_agentdojo(
     print(f"  Generation took {time.time() - start_time:.1f}s")
 
     # Run evaluations
-    print(f"\nRunning AgentDojo evaluations...")
+    print(f"\nRunning {benchmark_label} evaluations...")
     all_results = []
     suite_results = defaultdict(lambda: {"total": 0, "success": 0, "utility": 0})
     injection_task_results = defaultdict(lambda: {"total": 0, "success": 0})
@@ -298,7 +300,7 @@ def evaluate_agentdojo(
     pair_seen: set = set()                       # all task pairs encountered so far
 
     attacker_basename = os.path.basename(attacker_model.rstrip("/"))
-    attack_type = f"rl_attacker_{attacker_basename}"
+    attack_type = f"rl_attacker_{benchmark_slug}_{attacker_basename}"
 
     trace_logdir = logdir or os.path.join(output_dir, "runs")
     os.makedirs(trace_logdir, exist_ok=True)
@@ -314,7 +316,8 @@ def evaluate_agentdojo(
         if not candidates:
             return task_idx, sample_idx, False, False, injection_text
 
-        injections = {c: injection_text for c in candidates}
+        sanitized_text = sanitize_injection_text_for_yaml(injection_text)
+        injections = {c: sanitized_text for c in candidates}
 
         try:
             _null_logger = NullLogger()
@@ -453,6 +456,10 @@ def evaluate_agentdojo(
     passk_overall = total_passed  / total_pairs   if total_pairs   > 0 else 0
     util_overall  = total_util_pk / total_pairs   if total_pairs   > 0 else 0
 
+    total_samples = sum(s["total"] for s in suite_results.values())
+    total_success_samples = sum(s["success"] for s in suite_results.values())
+    sample_asr_overall = total_success_samples / total_samples if total_samples > 0 else 0
+
     # ── Print results ─────────────────────────────────────────────────────
     print(f"\n{'='*70}")
     print("EVALUATION RESULTS")
@@ -474,6 +481,7 @@ def evaluate_agentdojo(
 
     print(f"\n--- Overall ---")
     print(f"  Pass@{num_samples} ASR : {passk_overall:.1%} ({total_passed}/{total_pairs} pairs)")
+    print(f"  Sample ASR   : {sample_asr_overall:.1%} ({total_success_samples}/{total_samples} samples)")
     print(f"  Utility      : {util_overall:.1%} ({total_util_pk}/{total_pairs} pairs)")
 
     # ── Save results ──────────────────────────────────────────────────────
@@ -492,14 +500,20 @@ def evaluate_agentdojo(
         },
         "overall": {
             f"pass_at_{num_samples}": passk_overall,
+            "sample_asr": sample_asr_overall,
             "utility": util_overall,
             "total_pairs": total_pairs,
             "passed_pairs": total_passed,
+            "total_samples": total_samples,
+            "successful_samples": total_success_samples,
         },
         "per_suite": {
             sn: {
                 f"pass_at_{num_samples}": stats["pass"] / stats["total"] if stats["total"] > 0 else 0,
+                "sample_asr": suite_results[sn]["success"] / suite_results[sn]["total"] if suite_results[sn]["total"] > 0 else 0,
                 "utility": stats["utility"] / stats["total"] if stats["total"] > 0 else 0,
+                "total_samples": suite_results[sn]["total"],
+                "successful_samples": suite_results[sn]["success"],
                 **stats,
             }
             for sn, stats in passk_suite.items()
@@ -507,6 +521,9 @@ def evaluate_agentdojo(
         "per_injection_task": {
             ik: {
                 f"pass_at_{num_samples}": stats["pass"] / stats["total"] if stats["total"] > 0 else 0,
+                "sample_asr": injection_task_results[ik]["success"] / injection_task_results[ik]["total"] if injection_task_results[ik]["total"] > 0 else 0,
+                "total_samples": injection_task_results[ik]["total"],
+                "successful_samples": injection_task_results[ik]["success"],
                 **stats,
             }
             for ik, stats in passk_inj.items()

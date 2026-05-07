@@ -5,6 +5,7 @@ Reward function for AgentDojo RL attacker training.
 import os
 import json
 import warnings
+import unicodedata
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -13,7 +14,7 @@ from agentdojo.task_suite.load_suites import get_suite
 from agentdojo.task_suite.task_suite import TaskSuite
 from agentdojo.agent_pipeline.agent_pipeline import AgentPipeline, PipelineConfig
 
-from rl_attack.benchmarks.agentdojo.dataset import compute_injection_candidates
+from benchmarks.agentdojo.dataset import compute_injection_candidates
 
 
 AGENTDOJO_MODEL_ALIASES = {
@@ -62,6 +63,32 @@ def check_injection_text_format(completion: str) -> bool:
     )
 
 
+def sanitize_injection_text_for_yaml(text: str) -> str:
+    """Escape attacker output so string formatting keeps suite YAML parseable."""
+    if not text:
+        return ""
+
+    sanitized_chars = []
+    for ch in text:
+        code = ord(ch)
+        if 0xD800 <= code <= 0xDFFF:
+            continue
+        if ch in ("\n", "\r", "\t"):
+            sanitized_chars.append(ch)
+            continue
+        if unicodedata.category(ch) == "Cc":
+            continue
+        sanitized_chars.append(ch)
+
+    sanitized = "".join(sanitized_chars)
+    sanitized = sanitized.replace("\r\n", "\n").replace("\r", "\n")
+    sanitized = sanitized.replace("\\", "\\\\")
+    sanitized = sanitized.replace('"', '\\"')
+    sanitized = sanitized.replace("\t", "    ")
+    sanitized = sanitized.replace("\n", "\\n")
+    return sanitized
+
+
 class AgentDojoAttackReward:
     """
     Reward function for AgentDojo RL attacker training.
@@ -75,8 +102,11 @@ class AgentDojoAttackReward:
     Reward: 1.0 if attack succeeds (security=True), 0.0 otherwise.
     """
 
+    benchmark_name = "AgentDojo"
+    benchmark_slug = "agentdojo"
+
     def __init__(self, config):
-        self.__name__ = "AgentDojoAttackReward"
+        self.__name__ = self.__class__.__name__
         self.config = config
         self._trainer = None
         self._step_counter = 0
@@ -103,7 +133,7 @@ class AgentDojoAttackReward:
         if target_model_url:
             os.environ["AGENTDOJO_VLLM_URL"] = target_model_url
 
-        print(f"\nCreating AgentDojo target pipeline...")
+        print(f"\nCreating {self.benchmark_name} target pipeline...")
         print(f"  Target model: {target_model}")
         if target_model_id:
             print(f"  Model ID: {target_model_id}")
@@ -158,7 +188,8 @@ class AgentDojoAttackReward:
         user_task = suite.get_user_task_by_id(user_task_id)
         injection_task = suite.get_injection_task_by_id(injection_task_id)
 
-        injections = {candidate: injection_text for candidate in injection_candidates}
+        sanitized_text = sanitize_injection_text_for_yaml(injection_text)
+        injections = {candidate: sanitized_text for candidate in injection_candidates}
 
         try:
             utility, security = suite.run_task_with_pipeline(
@@ -170,7 +201,7 @@ class AgentDojoAttackReward:
             return utility, security
         except Exception as e:
             warnings.warn(
-                f"AgentDojo evaluation failed for {user_task_id}+{injection_task_id}: {e}"
+                f"{self.benchmark_name} evaluation failed for {user_task_id}+{injection_task_id}: {e}"
             )
             return False, False
 
@@ -266,7 +297,7 @@ class AgentDojoAttackReward:
         num_format_ok = sum(format_ok)
 
         print(
-            f"  [AgentDojo] Step {current_step} ASR: {asr:.1%} "
+            f"  [{self.benchmark_name}] Step {current_step} ASR: {asr:.1%} "
             f"({num_success}/{batch_size}), Format OK: {num_format_ok}/{batch_size}"
         )
 
@@ -276,7 +307,7 @@ class AgentDojoAttackReward:
             print(f"  Reward: {rewards[0]}")
 
         # Save log
-        log_file = os.path.join(self.log_dir, "agentdojo_training_samples.jsonl")
+        log_file = os.path.join(self.log_dir, f"{self.benchmark_slug}_training_samples.jsonl")
         try:
             log_entry = {
                 "step": current_step,

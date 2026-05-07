@@ -3,7 +3,7 @@
 Unified GRPO Training Script for PISmith
 
 Trains an attacker LLM using Group Relative Policy Optimization (GRPO)
-on one of three benchmarks: PIArena, InjecAgent, or AgentDojo.
+on one of four benchmarks: PIArena, InjecAgent, AgentDojo, or AgentDyn.
 
 Usage:
     # PIArena
@@ -20,6 +20,11 @@ Usage:
     accelerate launch -m train \\
         --benchmark agentdojo \\
         --config_file configs/agentdojo.yaml
+
+    # AgentDyn
+    accelerate launch -m train \\
+        --benchmark agentdyn \\
+        --config_file configs/agentdyn.yaml
 """
 
 import os
@@ -32,7 +37,7 @@ from peft import LoraConfig
 from core.utils import set_random_seed
 
 
-BENCHMARKS = ["piarena", "injecagent", "agentdojo"]
+BENCHMARKS = ["piarena", "injecagent", "agentdojo", "agentdyn"]
 
 
 def _pop_benchmark_arg(argv):
@@ -91,6 +96,8 @@ def main():
         _train_injecagent()
     elif benchmark == "agentdojo":
         _train_agentdojo()
+    elif benchmark == "agentdyn":
+        _train_agentdyn()
 
 
 def _build_peft_config(model_config: ModelConfig):
@@ -327,6 +334,105 @@ def _train_agentdojo():
 
     # ── Trainer setup ──────────────────────────────────────────
     reward_functions = [AgentDojoAttackReward(grpo_config)]
+
+    peft_config = _build_peft_config(model_config)
+    _apply_model_init_kwargs(grpo_config, model_config)
+
+    print(f"\n  Attacker : {grpo_config.attacker_model_name_or_path}")
+    print(f"  Target   : {grpo_config.target_model}")
+    if getattr(grpo_config, "target_defense", None):
+        print(f"  Defense  : {grpo_config.target_defense}")
+    print(f"  Suites   : {grpo_config.train_suites}")
+    if eval_dataset is not None:
+        print(f"  Eval set : {len(eval_dataset)} samples")
+    print(f"  Output   : {grpo_config.output_dir}")
+
+    trainer = _make_trainer(
+        grpo_config, reward_functions, train_dataset, peft_config,
+        use_adaptive=getattr(grpo_config, "adaptive", False),
+        eval_dataset=eval_dataset,
+    )
+    trainer.train(resume_from_checkpoint=grpo_config.resume_from_checkpoint)
+    print(f"\nTraining complete. Checkpoints: {grpo_config.output_dir}")
+
+
+def _train_agentdyn():
+    from trl import TrlParser
+    from benchmarks.agentdyn.config import AgentDynGRPOConfig
+    from benchmarks.agentdyn.dataset import AgentDynDataset
+    from benchmarks.agentdyn.reward import AgentDynAttackReward
+
+    parser = TrlParser((AgentDynGRPOConfig, ModelConfig))
+    grpo_config, model_config = parser.parse_args_and_config()
+
+    print("=" * 70)
+    print("AgentDyn RL Attacker Training")
+    print("=" * 70)
+    set_random_seed(grpo_config.seed)
+
+    train_user_tasks = _parse_task_list(grpo_config.train_user_tasks)
+    train_injection_tasks = _parse_task_list(grpo_config.train_injection_tasks)
+
+    print(f"\nLoading AgentDyn train dataset...")
+    print(f"  Suites     : {grpo_config.train_suites}")
+    if train_user_tasks:
+        print(f"  User tasks : {train_user_tasks}")
+    if train_injection_tasks:
+        print(f"  Inj tasks  : {train_injection_tasks}")
+
+    train_dataset = AgentDynDataset(
+        suites=grpo_config.train_suites,
+        benchmark_version=grpo_config.benchmark_version,
+        user_tasks=train_user_tasks,
+        injection_tasks=train_injection_tasks,
+    )
+    print(f"Loaded {len(train_dataset)} AgentDyn training samples")
+
+    suite_counts = {}
+    for s in train_dataset.samples:
+        suite_counts[s["suite_name"]] = suite_counts.get(s["suite_name"], 0) + 1
+    for sn, cnt in suite_counts.items():
+        print(f"  {sn}: {cnt} samples")
+
+    if len(train_dataset) == 0:
+        raise ValueError(
+            "No training samples found. Check suite/task configuration.\n"
+            f"  train_suites: {grpo_config.train_suites}\n"
+            f"  train_user_tasks: {train_user_tasks}\n"
+            f"  train_injection_tasks: {train_injection_tasks}"
+        )
+
+    eval_dataset = None
+    has_separate_eval = (
+        grpo_config.eval_suites is not None
+        or grpo_config.eval_injection_tasks is not None
+        or grpo_config.eval_user_tasks is not None
+    )
+    if has_separate_eval:
+        eval_suites_str = grpo_config.eval_suites or grpo_config.train_suites
+        eval_user_tasks = _parse_task_list(grpo_config.eval_user_tasks)
+        eval_injection_tasks = _parse_task_list(grpo_config.eval_injection_tasks)
+
+        print(f"\nLoading AgentDyn eval dataset...")
+        print(f"  Suites     : {eval_suites_str}")
+        if eval_user_tasks:
+            print(f"  User tasks : {eval_user_tasks}")
+        if eval_injection_tasks:
+            print(f"  Inj tasks  : {eval_injection_tasks}")
+
+        eval_dataset = AgentDynDataset(
+            suites=eval_suites_str,
+            benchmark_version=grpo_config.benchmark_version,
+            user_tasks=eval_user_tasks,
+            injection_tasks=eval_injection_tasks,
+        )
+        if len(eval_dataset) == 0:
+            print("WARNING: No eval samples found, disabling eval_dataset.")
+            eval_dataset = None
+        else:
+            print(f"Loaded {len(eval_dataset)} AgentDyn eval samples")
+
+    reward_functions = [AgentDynAttackReward(grpo_config)]
 
     peft_config = _build_peft_config(model_config)
     _apply_model_init_kwargs(grpo_config, model_config)

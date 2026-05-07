@@ -9,8 +9,9 @@
 #   bash scripts/train_agentdojo.sh [target_type] [suites] [train_gpus]
 #
 # target_type:
-#   gpt4o-mini   GPT-4o-mini via Azure API (default)
-#   gpt4o        GPT-4o via Azure API
+#   gpt4o-mini   GPT-4o-mini via OpenAI API (default)
+#   gpt4o        GPT-4o via OpenAI API
+#   gpt5-nano    GPT-5-nano via OpenAI API
 #   local        Local vLLM model (needs GPU 0 for vLLM server)
 #
 # suites:
@@ -92,14 +93,21 @@ case "$TARGET_TYPE" in
     TARGET_MODEL_ID=""
     TARGET_MODEL_URL=""
     NEEDS_VLLM=0
-    echo "Target: GPT-4o-mini-2024-07-18 (Azure/OpenAI API)"
+    echo "Target: GPT-4o-mini-2024-07-18 (OpenAI API)"
     ;;
   gpt4o)
     TARGET_MODEL="gpt-4o-2024-05-13"
     TARGET_MODEL_ID=""
     TARGET_MODEL_URL=""
     NEEDS_VLLM=0
-    echo "Target: GPT-4o-2024-05-13 (Azure/OpenAI API)"
+    echo "Target: GPT-4o-2024-05-13 (OpenAI API)"
+    ;;
+  gpt5-nano)
+    TARGET_MODEL="gpt-5-nano"
+    TARGET_MODEL_ID=""
+    TARGET_MODEL_URL=""
+    NEEDS_VLLM=0
+    echo "Target: GPT-5-nano (OpenAI API)"
     ;;
   local)
     TARGET_MODEL="local"
@@ -110,10 +118,16 @@ case "$TARGET_TYPE" in
     ;;
   *)
     echo "Unknown target_type: $TARGET_TYPE"
-    echo "Available: gpt4o-mini, gpt4o, local"
+    echo "Available: gpt4o-mini, gpt4o, gpt5-nano, local"
     exit 1
     ;;
 esac
+
+if [ "$NEEDS_VLLM" -eq 0 ] && [ -z "${OPENAI_API_KEY:-}" ]; then
+    echo "ERROR: OPENAI_API_KEY is not set but target '$TARGET_TYPE' requires OpenAI API." >&2
+    echo "  Export it before running: export OPENAI_API_KEY=sk-..." >&2
+    exit 1
+fi
 
 echo "============================================================"
 echo "  Target model  : $TARGET_MODEL"
