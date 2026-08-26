@@ -15,7 +15,7 @@
 #   target_gpu   GPU for target vLLM server (default: 0)
 #   target_port  Port for vLLM target server (default: 8000)
 #   eval_gpu     GPU for local attacker inference (default: 1)
-#   num_samples  Pass@k samples per case (default: 1)
+#   num_samples  Pass@k samples per case (default: 10)
 #
 # Examples:
 #   # Evaluate against local target (pass@1)
@@ -50,6 +50,7 @@ TARGET_GPU=${3:-0}
 TARGET_PORT=${4:-8000}
 EVAL_GPU=${5:-1}
 NUM_SAMPLES=${6:-10}
+ATTACKER_MAX_TOKENS=${ATTACKER_MAX_TOKENS:-4096}
 
 TEST_DATA="data/injecagent/dataset/test.json"
 OUTPUT_DIR="eval_results/injecagent_$(basename "$CHECKPOINT")"
@@ -158,6 +159,7 @@ python -m eval.eval_injecagent \
     "${TARGET_ARGS[@]}" \
     --data_path "$TEST_DATA" \
     --num_samples "$NUM_SAMPLES" \
+    --max_new_tokens "$ATTACKER_MAX_TOKENS" \
     --output_dir "$OUTPUT_DIR" \
     --batch_size 20 \
     --num_workers 10

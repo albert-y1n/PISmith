@@ -11,9 +11,9 @@
 #
 # Arguments:
 #   checkpoint     Path to trained attacker checkpoint (required)
-#   target_type    gpt4o-mini | gpt4o | gpt5-nano | local (default: gpt4o-mini)
+#   target_type    gpt4o-mini | gpt4o | gpt5-nano | gpt5.6-luna | local (default: gpt4o-mini)
 #   eval_suites    comma-separated suites (default: workspace,banking,travel,slack)
-#   num_samples    Pass@k: samples per task pair (default: 1)
+#   num_samples    Pass@k: samples per task pair (default: 10)
 #   target_defense AgentDojo defense (default: none)
 #
 # Env vars:
@@ -24,6 +24,7 @@
 #   ATTACKER_DP_SIZE Data parallel replicas for attacker vLLM server (default: 1)
 #   ATTACKER_PORT  Port for attacker vLLM server (default: 8001)
 #   ATTACKER_URL   Use external attacker vLLM server (skips launching a new one)
+#   MAX_WORKERS    Concurrent target evaluations (default: 16)
 #
 # Examples:
 #   # Eval on all suites, GPT-4o-mini target
@@ -65,6 +66,7 @@ CHECKPOINT=${1:-"checkpoints/agentdojo/checkpoint-"}
 TARGET_TYPE=${2:-gpt4o-mini}
 EVAL_SUITES=${3:-"workspace,banking,travel,slack"}
 NUM_SAMPLES=${4:-10}
+ATTACKER_MAX_TOKENS=${ATTACKER_MAX_TOKENS:-4096}
 TARGET_DEFENSE=${5:-}
 
 # Optional fine-grained task filtering (env vars)
@@ -77,6 +79,7 @@ ATTACKER_GPU=${ATTACKER_GPU:-1}
 ATTACKER_GPUS=${ATTACKER_GPUS:-$ATTACKER_GPU}
 ATTACKER_DP_SIZE=${ATTACKER_DP_SIZE:-1}
 ATTACKER_PORT=${ATTACKER_PORT:-8001}
+MAX_WORKERS=${MAX_WORKERS:-16}
 VLLM_TARGET_PID=""
 VLLM_ATTACKER_PID=""
 
@@ -106,6 +109,12 @@ case "$TARGET_TYPE" in
     TARGET_MODEL_URL=""
     NEEDS_VLLM=0
     ;;
+  gpt5.6-luna|gpt-5.6-luna)
+    TARGET_MODEL="gpt-5.6-luna"
+    TARGET_MODEL_ID=""
+    TARGET_MODEL_URL=""
+    NEEDS_VLLM=0
+    ;;
   local)
     TARGET_MODEL="local"
     TARGET_MODEL_ID="meta-llama/Llama-3.1-8B-Instruct"
@@ -114,7 +123,7 @@ case "$TARGET_TYPE" in
     ;;
   *)
     echo "Unknown target_type: $TARGET_TYPE"
-    echo "Available: gpt4o-mini, gpt4o, gpt5-nano, local"
+    echo "Available: gpt4o-mini, gpt4o, gpt5-nano, gpt5.6-luna, local"
     exit 1
     ;;
 esac
@@ -170,7 +179,6 @@ if [ "$NEEDS_VLLM" -eq 1 ]; then
         --gpu-memory-utilization 0.8 \
         --dtype bfloat16 \
         --trust-remote-code \
-        --disable-frontend-multiprocessing \
         > "$LOG_TARGET" 2>&1 &
     VLLM_TARGET_PID=$!
     echo "  Target vLLM PID: $VLLM_TARGET_PID"
@@ -211,7 +219,6 @@ else
         --gpu-memory-utilization 0.8 \
         --dtype bfloat16 \
         --trust-remote-code \
-        --disable-frontend-multiprocessing \
         "${ATTACKER_VLLM_ARGS[@]}" \
         > "$LOG_ATTACKER" 2>&1 &
     VLLM_ATTACKER_PID=$!
@@ -261,7 +268,8 @@ python -m eval.eval_agentdojo \
     $TARGET_ARGS \
     --eval_suites "$EVAL_SUITES" \
     --num_samples "$NUM_SAMPLES" \
-    --max_workers 16 \
+    --max_tokens "$ATTACKER_MAX_TOKENS" \
+    --max_workers "$MAX_WORKERS" \
     --output_dir "$OUTPUT_DIR" \
     $FILTER_ARGS
 

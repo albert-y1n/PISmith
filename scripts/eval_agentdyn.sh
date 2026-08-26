@@ -7,7 +7,7 @@
 #       <checkpoint> [target_type] [eval_suites] [num_samples] [target_defense]
 #
 # target_type:
-#   gpt4o-mini | gpt4o | gpt5-nano | local
+#   gpt4o-mini | gpt4o | gpt5-nano | gpt5.6-luna | gpt5.6-terra | local
 #
 # Env vars:
 #   TARGET_GPU       GPU index for target vLLM server (default: 0, only for local target)
@@ -17,6 +17,7 @@
 #   ATTACKER_DP_SIZE Data parallel replicas for attacker vLLM server (default: 1)
 #   ATTACKER_PORT    Port for attacker vLLM server (default: 8001)
 #   ATTACKER_URL     Use external attacker vLLM server (skips launching a new one)
+#   MAX_WORKERS      Concurrent target evaluations (default: 16)
 # ============================================================
 
 set -euo pipefail
@@ -32,7 +33,8 @@ export OPENAI_API_KEY="${OPENAI_API_KEY:-}"
 CHECKPOINT=${1:-"checkpoints/agentdyn/checkpoint-"}
 TARGET_TYPE=${2:-gpt4o-mini}
 EVAL_SUITES=${3:-"github,dailylife,shopping"}
-NUM_SAMPLES=${4:-5}
+NUM_SAMPLES=${4:-10}
+ATTACKER_MAX_TOKENS=${ATTACKER_MAX_TOKENS:-4096}
 TARGET_DEFENSE=${5:-}
 
 EVAL_INJ=${EVAL_INJ:-}
@@ -44,6 +46,7 @@ ATTACKER_GPU=${ATTACKER_GPU:-1}
 ATTACKER_GPUS=${ATTACKER_GPUS:-$ATTACKER_GPU}
 ATTACKER_DP_SIZE=${ATTACKER_DP_SIZE:-1}
 ATTACKER_PORT=${ATTACKER_PORT:-8001}
+MAX_WORKERS=${MAX_WORKERS:-16}
 VLLM_TARGET_PID=""
 VLLM_ATTACKER_PID=""
 
@@ -70,6 +73,18 @@ case "$TARGET_TYPE" in
     TARGET_MODEL_URL=""
     NEEDS_VLLM=0
     ;;
+  gpt5.6-luna|gpt-5.6-luna)
+    TARGET_MODEL="gpt-5.6-luna"
+    TARGET_MODEL_ID=""
+    TARGET_MODEL_URL=""
+    NEEDS_VLLM=0
+    ;;
+  gpt5.6-terra|gpt-5.6-terra)
+    TARGET_MODEL="gpt-5.6-terra"
+    TARGET_MODEL_ID=""
+    TARGET_MODEL_URL=""
+    NEEDS_VLLM=0
+    ;;
   local)
     TARGET_MODEL="local"
     TARGET_MODEL_ID="meta-llama/Llama-3.1-8B-Instruct"
@@ -78,7 +93,7 @@ case "$TARGET_TYPE" in
     ;;
   *)
     echo "Unknown target_type: $TARGET_TYPE"
-    echo "Available: gpt4o-mini, gpt4o, gpt5-nano, local"
+    echo "Available: gpt4o-mini, gpt4o, gpt5-nano, gpt5.6-luna, gpt5.6-terra, local"
     exit 1
     ;;
 esac
@@ -97,6 +112,7 @@ echo "  Attacker GPU(s) : $ATTACKER_GPUS port: $ATTACKER_PORT"
 echo "  Attacker DP     : $ATTACKER_DP_SIZE"
 echo "  Suites          : $EVAL_SUITES"
 echo "  Pass@k          : $NUM_SAMPLES"
+echo "  Max workers     : $MAX_WORKERS"
 echo "  Defense         : ${TARGET_DEFENSE:-none}"
 [ -n "$EVAL_INJ" ] && echo "  Inj tasks       : $EVAL_INJ"
 [ -n "$EVAL_USER" ] && echo "  User tasks      : $EVAL_USER"
@@ -207,7 +223,8 @@ python -m eval.eval_agentdyn \
     $TARGET_ARGS \
     --eval_suites "$EVAL_SUITES" \
     --num_samples "$NUM_SAMPLES" \
-    --max_workers 16 \
+    --max_tokens "$ATTACKER_MAX_TOKENS" \
+    --max_workers "$MAX_WORKERS" \
     --output_dir "$OUTPUT_DIR" \
     $FILTER_ARGS
 

@@ -45,6 +45,7 @@ TARGET_GPU=${4:-0}
 ATTACKER_GPU=${5:-1}
 ATTACKER_PORT=${6:-8001}
 NUM_SAMPLES=${7:-10}
+ATTACKER_MAX_TOKENS=${ATTACKER_MAX_TOKENS:-4096}
 
 JUDGE_CONFIG="configs/judge.yaml"
 OUTPUT_DIR="eval_results/piarena_${DEFENSE}_$(basename $CHECKPOINT)"
@@ -168,6 +169,7 @@ python -m eval.eval_piarena \
     --judge_model_config "$JUDGE_CONFIG" \
     --data_path "$DATA_PATH" \
     --num_samples "$NUM_SAMPLES" \
+    --max_new_tokens "$ATTACKER_MAX_TOKENS" \
     --output_dir "$OUTPUT_DIR" \
     --batch_size 16
 
