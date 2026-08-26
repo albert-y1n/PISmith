@@ -1,5 +1,6 @@
 accelerate==1.11.0
 agentdojo==0.1.35
+ipi-arena-bench @ git+https://github.com/GraySwanAI/ipi_arena_os.git@5e2e285910d581c97767195f1d113ef323f9ab07
 # AgentDyn is not packaged on PyPI. Install it after cloning:
 #   git clone https://github.com/SaFo-Lab/AgentDyn.git
 #   cd AgentDyn && pip install -e . --no-deps
@@ -193,6 +194,7 @@ peft==0.17.1
 pexpect==4.9.0
 pillow==11.0.0
 platformdirs==4.5.0
+playwright>=1.40.0
 polars==1.34.0
 polars-runtime-32==1.34.0
 preshed==3.0.12

@@ -74,9 +74,9 @@ def generate_attacks_vllm(
     model_name: str,
     tokenizer,
     prompts: List[List[Dict]],
-    max_tokens: int = 512,
+    max_tokens: int = 4096,
     temperature: float = 0.7,
-    num_samples: int = 1,
+    num_samples: int = 10,
 ) -> List[List[str]]:
     """Generate attack prompts from a vLLM-served attacker model."""
     input_texts = [
@@ -114,9 +114,9 @@ def generate_attacks_local(
     model,
     tokenizer,
     prompts: List[List[Dict]],
-    max_tokens: int = 512,
+    max_tokens: int = 4096,
     temperature: float = 0.7,
-    num_samples: int = 1,
+    num_samples: int = 10,
     batch_size: int = 4,
 ) -> List[List[str]]:
     """Generate attack prompts from a local model."""
@@ -321,9 +321,9 @@ def main():
     parser.add_argument("--max_samples", type=int, default=None)
 
     # Generation
-    parser.add_argument("--max_new_tokens", type=int, default=512)
+    parser.add_argument("--max_new_tokens", type=int, default=4096)
     parser.add_argument("--temperature", type=float, default=0.7)
-    parser.add_argument("--num_samples", type=int, default=1, help="Pass@k")
+    parser.add_argument("--num_samples", type=int, default=10, help="Pass@k")
     parser.add_argument("--batch_size", type=int, default=16)
 
     # Output

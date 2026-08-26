@@ -209,7 +209,7 @@ class PIArenaEvaluator:
             default_temperature=0.0,
         )
 
-    def generate_attacks(self, samples: List[Dict], num_samples: int = 1) -> List[List[str]]:
+    def generate_attacks(self, samples: List[Dict], num_samples: int = 10) -> List[List[str]]:
         """Generate attack prompts for a batch of samples."""
         input_texts = [
             self.attacker_tokenizer.apply_chat_template(
@@ -579,13 +579,13 @@ def main():
     parser.add_argument("--attack_template", default="recent_update")
 
     # Generation
-    parser.add_argument("--max_new_tokens", type=int, default=1024)
+    parser.add_argument("--max_new_tokens", type=int, default=4096)
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--do_sample", action="store_true", default=True)
     parser.add_argument("--no_do_sample", action="store_false", dest="do_sample")
     parser.add_argument("--format_prompt", action="store_true", default=True)
     parser.add_argument("--no_format_prompt", action="store_false", dest="format_prompt")
-    parser.add_argument("--num_samples", type=int, default=1, help="Pass@k: samples per case")
+    parser.add_argument("--num_samples", type=int, default=10, help="Pass@k: samples per case")
 
     # Judge
     parser.add_argument("--judge_model_config", required=True,

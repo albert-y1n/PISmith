@@ -20,6 +20,8 @@ def main():
     parser.add_argument("--target_model", default="gpt-4o-mini-2024-07-18")
     parser.add_argument("--target_model_id", default=None)
     parser.add_argument("--target_model_url", default=None)
+    parser.add_argument("--target_adapter", choices=["secopd"], default=None)
+    parser.add_argument("--target_max_tokens", type=int, default=32768)
     parser.add_argument("--target_defense", default=None)
 
     parser.add_argument("--eval_suites", default="workspace,github,dailylife,shopping")
@@ -30,9 +32,11 @@ def main():
     parser.add_argument("--format_prompt", action="store_true", default=True)
     parser.add_argument("--no_format_prompt", action="store_false", dest="format_prompt")
 
-    parser.add_argument("--max_tokens", type=int, default=512)
+    parser.add_argument("--max_tokens", type=int, default=4096)
     parser.add_argument("--temperature", type=float, default=0.7)
-    parser.add_argument("--num_samples", type=int, default=1)
+    parser.add_argument("--num_samples", type=int, default=10)
+    parser.add_argument("--injections_cache", default=None)
+    parser.add_argument("--generate_only", action="store_true")
 
     parser.add_argument("--max_workers", type=int, default=8)
     parser.add_argument("--output_dir", default="eval_results/agentdyn")
@@ -59,6 +63,8 @@ def main():
         eval_injection_tasks=eval_injection_tasks,
         target_model_id=args.target_model_id,
         target_model_url=args.target_model_url,
+        target_adapter=args.target_adapter,
+        target_max_tokens=args.target_max_tokens,
         target_defense=args.target_defense,
         attacker_server_url=args.attacker_server_url,
         attacker_base_model=args.attacker_base_model,
@@ -70,6 +76,8 @@ def main():
         output_dir=args.output_dir,
         logdir=args.logdir,
         seed=args.seed,
+        injections_cache=args.injections_cache,
+        generate_only=args.generate_only,
         benchmark_label="AgentDyn",
         benchmark_slug="agentdyn",
         dataset_cls=AgentDynDataset,

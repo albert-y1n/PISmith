@@ -23,6 +23,7 @@ checkpoints/
 # Logs
 logs/
 *.log
+wandb/
 
 # Eval results
 eval_results/

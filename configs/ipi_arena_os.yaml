@@ -1,0 +1,67 @@
+# IPI Arena OS: https://github.com/GraySwanAI/ipi_arena_os
+
+# Behavior selection (41 total: tool=18, coding=15, browser=8)
+categories: tool,coding,browser
+# behavior_ids: null
+# waves: null
+# eval_categories: null
+# eval_behavior_ids: null
+# eval_waves: null
+# behaviors_path: null
+
+format_prompt: true
+attacker_model_name_or_path: Qwen/Qwen3-4B-Instruct-2507
+
+# Target agent
+target_provider: openai
+target_model: gpt-5.6-luna
+target_api_key_env: OPENAI_API_KEY
+# target_base_url: null
+target_reasoning_effort: none
+
+# LLM judge and WorldSim both default to GPT-5.6 Luna.
+judge_provider: openai
+judge_model: gpt-5.6-luna
+judge_api_key_env: OPENAI_API_KEY
+# judge_base_url: null
+judge_reasoning_effort: none
+
+worldsim_provider: openai
+worldsim_model: gpt-5.6-luna
+worldsim_api_key_env: OPENAI_API_KEY
+# worldsim_base_url: null
+worldsim_reasoning_effort: none
+
+max_steps: 5
+eval_max_workers: 8
+soft_rewards: false
+reward_functions:
+  - IPIArenaOSAttackReward
+
+# GRPO generation
+max_completion_length: 512
+num_generations: 16
+temperature: 1.0
+
+# Training
+output_dir: checkpoints/ipi_arena_os
+per_device_train_batch_size: 8
+gradient_accumulation_steps: 2
+learning_rate: 1.0e-5
+num_train_epochs: 10
+seed: 42
+save_steps: 100
+save_total_limit: 2
+logging_steps: 1
+bf16: true
+max_grad_norm: 1.0
+loss_type: grpo
+epsilon: 0.5
+beta: 0.0
+warmup_ratio: 0.02
+lr_scheduler_type: constant_with_warmup
+gradient_checkpointing: true
+adaptive: true
+
+report_to: wandb
+run_name: ipi_arena_os

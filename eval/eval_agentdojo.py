@@ -29,6 +29,7 @@ Usage:
 import os
 import json
 import argparse
+import random
 import time
 from datetime import datetime
 from typing import List, Dict, Any, Optional
@@ -58,13 +59,47 @@ from benchmarks.agentdojo.dataset import AgentDojoDataset
 from core.utils import set_random_seed
 
 
+def select_detailed_results(
+    all_results: List[Dict[str, Any]],
+    seed: int,
+) -> List[Dict[str, Any]]:
+    """Select one representative result per suite/user/injection task pair.
+
+    Prefer a randomly selected successful attack. If the pair has no successful
+    sample, randomly select any sample. Sorting both pair keys and candidates
+    keeps the seeded selection reproducible even though evaluations finish in a
+    nondeterministic order.
+    """
+    grouped_results = defaultdict(list)
+    for result in all_results:
+        pair_key = (
+            result["suite_name"],
+            result["user_task_id"],
+            result["injection_task_id"],
+        )
+        grouped_results[pair_key].append(result)
+
+    rng = random.Random(seed)
+    selected_results = []
+    for pair_key in sorted(grouped_results):
+        pair_results = sorted(
+            grouped_results[pair_key], key=lambda result: result["sample_idx"]
+        )
+        successful_results = [
+            result for result in pair_results if result["attack_success"]
+        ]
+        selected_results.append(rng.choice(successful_results or pair_results))
+
+    return selected_results
+
+
 def generate_injections_vllm(
     client: OpenAI,
     model_name: str,
     prompts: List[str],
-    max_tokens: int = 512,
+    max_tokens: int = 4096,
     temperature: float = 0.7,
-    num_samples: int = 1,
+    num_samples: int = 10,
     batch_size: int = 32,
 ) -> List[List[str]]:
     """Generate injection prompts using vLLM server."""
@@ -101,9 +136,9 @@ def generate_injections_local(
     model,
     tokenizer,
     prompts: List[str],
-    max_tokens: int = 512,
+    max_tokens: int = 4096,
     temperature: float = 0.7,
-    num_samples: int = 1,
+    num_samples: int = 10,
     batch_size: int = 4,
 ) -> List[List[str]]:
     """Generate injection prompts using local transformers model."""
@@ -160,17 +195,21 @@ def evaluate_agentdojo(
     eval_injection_tasks: Optional[List[str]] = None,
     target_model_id: Optional[str] = None,
     target_model_url: Optional[str] = None,
+    target_adapter: Optional[str] = None,
+    target_max_tokens: int = 32768,
     target_defense: Optional[str] = None,
     attacker_server_url: Optional[str] = None,
     attacker_base_model: Optional[str] = None,
     format_prompt: bool = True,
-    max_tokens: int = 512,
+    max_tokens: int = 4096,
     temperature: float = 0.7,
-    num_samples: int = 1,
+    num_samples: int = 10,
     max_workers: int = 8,
     output_dir: str = "eval_results",
     logdir: Optional[str] = None,
     seed: int = 42,
+    injections_cache: Optional[str] = None,
+    generate_only: bool = False,
     benchmark_label: str = "AgentDojo",
     benchmark_slug: str = "agentdojo",
     dataset_cls=AgentDojoDataset,
@@ -197,19 +236,6 @@ def evaluate_agentdojo(
         os.environ["AGENTDOJO_VLLM_MODEL"] = target_model_id
     if target_model_url:
         os.environ["AGENTDOJO_VLLM_URL"] = target_model_url
-
-    # Create target pipeline
-    print("\nCreating target pipeline...")
-    llm_resolved = _resolve_agentdojo_model(target_model)
-    pipeline_config = PipelineConfig(
-        llm=llm_resolved,
-        model_id=target_model_id,
-        defense=target_defense,
-        system_message_name=None,
-        system_message=None,
-    )
-    pipeline = AgentPipeline.from_config(pipeline_config)
-    print(f"  Pipeline name: {pipeline.name}")
 
     # Load evaluation dataset
     print("\nLoading evaluation dataset...")
@@ -242,53 +268,116 @@ def evaluate_agentdojo(
             }
         )
 
-    # Load attacker model
-    if attacker_server_url:
-        attacker_client = OpenAI(base_url=attacker_server_url, api_key="EMPTY")
-        try:
-            models = attacker_client.models.list()
-            attacker_model_name = models.data[0].id
-            print(f"\nvLLM serving model: {attacker_model_name}")
-        except Exception:
+    # Generate once and optionally cache the attacker outputs. This allows the
+    # attacker server to be stopped before a large target claims all GPUs.
+    if injections_cache and os.path.exists(injections_cache):
+        print(f"\nLoading cached injection prompts: {injections_cache}")
+        with open(injections_cache) as cache_file:
+            cache_payload = json.load(cache_file)
+        all_outputs = cache_payload["outputs"]
+        if len(all_outputs) != len(prompts) or any(
+            len(outputs) != num_samples for outputs in all_outputs
+        ):
+            raise ValueError(
+                "Injection cache shape does not match the selected task pairs/num_samples"
+            )
+        print(f"  Loaded {len(all_outputs) * num_samples} cached prompts")
+    else:
+        if attacker_server_url:
+            attacker_client = OpenAI(base_url=attacker_server_url, api_key="EMPTY")
+            try:
+                models = attacker_client.models.list()
+                attacker_model_name = models.data[0].id
+                print(f"\nvLLM serving model: {attacker_model_name}")
+            except Exception:
+                attacker_model_name = attacker_model
+            local_attacker = None
+            local_tokenizer = None
+        else:
+            print(f"\nLoading attacker model: {attacker_model}")
+            base = attacker_base_model or "Qwen/Qwen3-4B-Instruct-2507"
+            is_lora = os.path.exists(os.path.join(attacker_model, "adapter_config.json"))
+            local_tokenizer = AutoTokenizer.from_pretrained(
+                base if is_lora else attacker_model, trust_remote_code=True
+            )
+            if local_tokenizer.pad_token is None:
+                local_tokenizer.pad_token = local_tokenizer.eos_token
+            base_model = AutoModelForCausalLM.from_pretrained(
+                base if is_lora else attacker_model,
+                torch_dtype=torch.bfloat16, device_map="auto", trust_remote_code=True,
+            )
+            if is_lora and HAS_PEFT:
+                base_model = PeftModel.from_pretrained(base_model, attacker_model)
+                base_model = base_model.merge_and_unload()
+            local_attacker = base_model.eval()
+            attacker_client = None
             attacker_model_name = attacker_model
-        local_attacker = None
-        local_tokenizer = None
-    else:
-        print(f"\nLoading attacker model: {attacker_model}")
-        base = attacker_base_model or "Qwen/Qwen3-4B-Instruct-2507"
-        is_lora = os.path.exists(os.path.join(attacker_model, "adapter_config.json"))
-        local_tokenizer = AutoTokenizer.from_pretrained(
-            base if is_lora else attacker_model, trust_remote_code=True
-        )
-        if local_tokenizer.pad_token is None:
-            local_tokenizer.pad_token = local_tokenizer.eos_token
-        base_model = AutoModelForCausalLM.from_pretrained(
-            base if is_lora else attacker_model,
-            torch_dtype=torch.bfloat16, device_map="auto", trust_remote_code=True,
-        )
-        if is_lora and HAS_PEFT:
-            base_model = PeftModel.from_pretrained(base_model, attacker_model)
-            base_model = base_model.merge_and_unload()
-        local_attacker = base_model.eval()
-        attacker_client = None
-        attacker_model_name = attacker_model
 
-    # Generate injection prompts
-    print(f"\nGenerating injection prompts ({len(prompts)} task pairs x {num_samples} samples)...")
-    start_time = time.time()
+        print(f"\nGenerating injection prompts ({len(prompts)} task pairs x {num_samples} samples)...")
+        start_time = time.time()
+        if attacker_server_url:
+            all_outputs = generate_injections_vllm(
+                attacker_client, attacker_model_name, prompts,
+                max_tokens=max_tokens, temperature=temperature, num_samples=num_samples,
+            )
+        else:
+            all_outputs = generate_injections_local(
+                local_attacker, local_tokenizer, prompts,
+                max_tokens=max_tokens, temperature=temperature, num_samples=num_samples,
+            )
+        print(f"  Generation took {time.time() - start_time:.1f}s")
 
-    if attacker_server_url:
-        all_outputs = generate_injections_vllm(
-            attacker_client, attacker_model_name, prompts,
-            max_tokens=max_tokens, temperature=temperature, num_samples=num_samples,
-        )
-    else:
-        all_outputs = generate_injections_local(
-            local_attacker, local_tokenizer, prompts,
-            max_tokens=max_tokens, temperature=temperature, num_samples=num_samples,
-        )
+        if injections_cache:
+            os.makedirs(os.path.dirname(os.path.abspath(injections_cache)), exist_ok=True)
+            with open(injections_cache, "w") as cache_file:
+                json.dump(
+                    {
+                        "version": 1,
+                        "eval_suites": eval_suites,
+                        "benchmark_version": benchmark_version,
+                        "num_samples": num_samples,
+                        "outputs": all_outputs,
+                    },
+                    cache_file,
+                    ensure_ascii=False,
+                )
+            print(f"  Cached injection prompts: {injections_cache}")
 
-    print(f"  Generation took {time.time() - start_time:.1f}s")
+    if generate_only:
+        if not injections_cache:
+            raise ValueError("--generate_only requires --injections_cache")
+        print("Generation-only phase complete.")
+        return {"injections_cache": injections_cache}
+
+    # Create the target only after attacker generation/cache loading so two-stage
+    # launchers can release attacker GPUs before serving the target.
+    print("\nCreating target pipeline...")
+    llm_resolved = _resolve_agentdojo_model(target_model)
+    if target_adapter == "secopd":
+        if not target_model_id or not target_model_url:
+            raise ValueError(
+                "SecOPD target requires both target_model_id and target_model_url"
+            )
+        from benchmarks.agentdyn.secopd import SecOPDVLLM
+
+        llm_resolved = SecOPDVLLM(
+            base_url=target_model_url,
+            model=target_model_id,
+            max_tokens=target_max_tokens,
+        )
+        print("  Target adapter: SecOPD (tool -> input)")
+        print("  Target temperature: 0")
+        print("  Target enable_thinking: True")
+        print(f"  Target max_tokens: {target_max_tokens}")
+    pipeline_config = PipelineConfig(
+        llm=llm_resolved,
+        model_id=target_model_id,
+        defense=target_defense,
+        system_message_name=None,
+        system_message=None,
+    )
+    pipeline = AgentPipeline.from_config(pipeline_config)
+    print(f"  Pipeline name: {pipeline.name}")
 
     # Run evaluations
     print(f"\nRunning {benchmark_label} evaluations...")
@@ -297,6 +386,7 @@ def evaluate_agentdojo(
     injection_task_results = defaultdict(lambda: {"total": 0, "success": 0})
     # pass@k tracking: per task-pair whether any sample has succeeded so far
     pair_ever_succeeded: Dict[str, bool] = {}   # key=(suite/user/inj) -> bool
+    pair_completed_samples: Dict[str, int] = defaultdict(int)
     pair_seen: set = set()                       # all task pairs encountered so far
 
     attacker_basename = os.path.basename(attacker_model.rstrip("/"))
@@ -352,6 +442,9 @@ def evaluate_agentdojo(
 
     eval_start = time.time()
     futures = []
+    partial_file = os.path.join(output_dir, "eval_partial.jsonl")
+    progress_file = os.path.join(output_dir, "eval_progress.json")
+    partial_handle = open(partial_file, "w")
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         for task_idx in range(len(metadata)):
             meta = metadata[task_idx]
@@ -376,12 +469,13 @@ def evaluate_agentdojo(
                     "injection_task_id": meta["injection_task_id"],
                     "injection_task_goal": meta["injection_task_goal"],
                     "sample_idx": sample_idx,
-                    "injection_text": injection_text[:500],
+                    "injection_text": injection_text,
                     "utility": utility,
                     "security": security,
                     "attack_success": attack_success,
                 }
                 all_results.append(result)
+                partial_handle.write(json.dumps(result, ensure_ascii=False) + "\n")
 
                 sn = meta["suite_name"]
                 suite_results[sn]["total"] += 1
@@ -398,6 +492,7 @@ def evaluate_agentdojo(
                 # Update pass@k tracking
                 pair_key = f"{sn}/{meta['user_task_id']}/{meta['injection_task_id']}"
                 pair_seen.add(pair_key)
+                pair_completed_samples[pair_key] += 1
                 if attack_success:
                     pair_ever_succeeded[pair_key] = True
                 elif pair_key not in pair_ever_succeeded:
@@ -411,6 +506,63 @@ def evaluate_agentdojo(
                     n_pairs_seen = len(pair_seen)
                     n_pairs_passed = sum(1 for v in pair_ever_succeeded.values() if v)
                     passk_running = n_pairs_passed / n_pairs_seen if n_pairs_seen > 0 else 0.0
+                    completed_pair_keys = {
+                        key for key, count in pair_completed_samples.items()
+                        if count == num_samples
+                    }
+                    completed_pairs_passed = sum(
+                        pair_ever_succeeded[key] for key in completed_pair_keys
+                    )
+                    passk_completed = (
+                        completed_pairs_passed / len(completed_pair_keys)
+                        if completed_pair_keys else None
+                    )
+
+                    progress_per_suite = {}
+                    for suite_name, stats in sorted(suite_results.items()):
+                        suite_pairs = {
+                            key for key in completed_pair_keys
+                            if key.startswith(f"{suite_name}/")
+                        }
+                        suite_passed = sum(
+                            pair_ever_succeeded[key] for key in suite_pairs
+                        )
+                        progress_per_suite[suite_name] = {
+                            "completed_samples": stats["total"],
+                            "sample_asr": (
+                                stats["success"] / stats["total"]
+                                if stats["total"] else 0
+                            ),
+                            f"pass_at_{num_samples}": (
+                                suite_passed / len(suite_pairs) if suite_pairs else 0
+                            ),
+                            "passed_pairs": suite_passed,
+                            "completed_pairs": len(suite_pairs),
+                            "utility": (
+                                stats["utility"] / stats["total"]
+                                if stats["total"] else 0
+                            ),
+                        }
+
+                    partial_handle.flush()
+                    with open(progress_file, "w") as progress_handle:
+                        json.dump(
+                            {
+                                "completed_samples": completed,
+                                "total_samples": total_futures,
+                                "sample_asr": sample_asr,
+                                f"pass_at_{num_samples}_running": passk_running,
+                                f"pass_at_{num_samples}": passk_completed,
+                                "passed_completed_pairs": completed_pairs_passed,
+                                "completed_pairs": len(completed_pair_keys),
+                                "passed_pairs_seen": n_pairs_passed,
+                                "pairs_seen": n_pairs_seen,
+                                "per_suite": progress_per_suite,
+                                "updated_at": datetime.now().isoformat(),
+                            },
+                            progress_handle,
+                            indent=2,
+                        )
 
                     print(f"  Progress: {completed}/{total_futures} | "
                           f"Sample ASR: {sample_asr:.1%} | "
@@ -418,6 +570,8 @@ def evaluate_agentdojo(
                           f"({n_pairs_passed}/{n_pairs_seen} pairs)")
             except Exception as e:
                 print(f"  Warning: Future failed: {e}")
+
+    partial_handle.close()
 
     eval_time = time.time() - eval_start
 
@@ -492,6 +646,11 @@ def evaluate_agentdojo(
             "attacker_model": attacker_model,
             "target_model": target_model,
             "target_model_id": target_model_id,
+            "target_model_url": target_model_url,
+            "target_adapter": target_adapter,
+            "target_temperature": 0 if target_adapter == "secopd" else None,
+            "target_enable_thinking": True if target_adapter == "secopd" else None,
+            "target_max_tokens": target_max_tokens if target_adapter == "secopd" else None,
             "target_defense": target_defense,
             "eval_suites": eval_suites,
             "benchmark_version": benchmark_version,
@@ -534,10 +693,14 @@ def evaluate_agentdojo(
     print(f"\nResults saved to: {results_file}")
 
     detailed_file = os.path.join(output_dir, "eval_detailed.jsonl")
+    detailed_results = select_detailed_results(all_results, seed)
     with open(detailed_file, "w") as f:
-        for result in all_results:
+        for result in detailed_results:
             f.write(json.dumps(result, ensure_ascii=False) + "\n")
-    print(f"Detailed results saved to: {detailed_file}")
+    print(
+        f"Detailed results saved to: {detailed_file} "
+        f"({len(detailed_results)} representative task-pair cases)"
+    )
 
     return summary
 
@@ -555,6 +718,8 @@ def main():
     parser.add_argument("--target_model", default="gpt-4o-mini-2024-07-18")
     parser.add_argument("--target_model_id", default=None)
     parser.add_argument("--target_model_url", default=None)
+    parser.add_argument("--target_adapter", choices=["secopd"], default=None)
+    parser.add_argument("--target_max_tokens", type=int, default=32768)
     parser.add_argument("--target_defense", default=None)
 
     # Evaluation config
@@ -567,9 +732,11 @@ def main():
     parser.add_argument("--no_format_prompt", action="store_false", dest="format_prompt")
 
     # Generation
-    parser.add_argument("--max_tokens", type=int, default=512)
+    parser.add_argument("--max_tokens", type=int, default=4096)
     parser.add_argument("--temperature", type=float, default=0.7)
-    parser.add_argument("--num_samples", type=int, default=1)
+    parser.add_argument("--num_samples", type=int, default=10)
+    parser.add_argument("--injections_cache", default=None)
+    parser.add_argument("--generate_only", action="store_true")
 
     # Other
     parser.add_argument("--max_workers", type=int, default=8)
@@ -597,6 +764,8 @@ def main():
         eval_injection_tasks=eval_injection_tasks,
         target_model_id=args.target_model_id,
         target_model_url=args.target_model_url,
+        target_adapter=args.target_adapter,
+        target_max_tokens=args.target_max_tokens,
         target_defense=args.target_defense,
         attacker_server_url=args.attacker_server_url,
         attacker_base_model=args.attacker_base_model,
@@ -608,6 +777,8 @@ def main():
         output_dir=args.output_dir,
         logdir=args.logdir,
         seed=args.seed,
+        injections_cache=args.injections_cache,
+        generate_only=args.generate_only,
     )
 
 
