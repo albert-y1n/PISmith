@@ -37,6 +37,7 @@ def main():
     parser.add_argument("--num_samples", type=int, default=10)
     parser.add_argument("--injections_cache", default=None)
     parser.add_argument("--generate_only", action="store_true")
+    parser.add_argument("--resume", action="store_true")
 
     parser.add_argument("--max_workers", type=int, default=8)
     parser.add_argument("--output_dir", default="eval_results/agentdyn")
@@ -78,6 +79,7 @@ def main():
         seed=args.seed,
         injections_cache=args.injections_cache,
         generate_only=args.generate_only,
+        resume=args.resume,
         benchmark_label="AgentDyn",
         benchmark_slug="agentdyn",
         dataset_cls=AgentDynDataset,

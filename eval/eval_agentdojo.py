@@ -51,7 +51,7 @@ from agentdojo.agent_pipeline.agent_pipeline import AgentPipeline, PipelineConfi
 from agentdojo.logging import NullLogger, TraceLogger, LOGGER_STACK
 
 from benchmarks.agentdojo.reward import (
-    _resolve_agentdojo_model,
+    _build_agentdojo_llm,
     extract_injection_text,
     sanitize_injection_text_for_yaml,
 )
@@ -210,6 +210,7 @@ def evaluate_agentdojo(
     seed: int = 42,
     injections_cache: Optional[str] = None,
     generate_only: bool = False,
+    resume: bool = False,
     benchmark_label: str = "AgentDojo",
     benchmark_slug: str = "agentdojo",
     dataset_cls=AgentDojoDataset,
@@ -352,7 +353,10 @@ def evaluate_agentdojo(
     # Create the target only after attacker generation/cache loading so two-stage
     # launchers can release attacker GPUs before serving the target.
     print("\nCreating target pipeline...")
-    llm_resolved = _resolve_agentdojo_model(target_model)
+    llm_resolved = _build_agentdojo_llm(target_model)
+    target_reasoning_effort = getattr(llm_resolved, "reasoning_effort", None)
+    if target_reasoning_effort:
+        print(f"  Target reasoning effort: {target_reasoning_effort}")
     if target_adapter == "secopd":
         if not target_model_id or not target_model_url:
             raise ValueError(
@@ -388,6 +392,61 @@ def evaluate_agentdojo(
     pair_ever_succeeded: Dict[str, bool] = {}   # key=(suite/user/inj) -> bool
     pair_completed_samples: Dict[str, int] = defaultdict(int)
     pair_seen: set = set()                       # all task pairs encountered so far
+
+    def add_result_to_aggregates(result: Dict[str, Any]) -> None:
+        sn = result["suite_name"]
+        attack_success = bool(result["attack_success"])
+        suite_results[sn]["total"] += 1
+        suite_results[sn]["success"] += int(attack_success)
+        suite_results[sn]["utility"] += int(bool(result["utility"]))
+
+        inj_key = f"{sn}/{result['injection_task_id']}"
+        injection_task_results[inj_key]["total"] += 1
+        injection_task_results[inj_key]["success"] += int(attack_success)
+
+        pair_key = (
+            f"{sn}/{result['user_task_id']}/{result['injection_task_id']}"
+        )
+        pair_seen.add(pair_key)
+        pair_completed_samples[pair_key] += 1
+        pair_ever_succeeded[pair_key] = (
+            pair_ever_succeeded.get(pair_key, False) or attack_success
+        )
+
+    partial_file = os.path.join(output_dir, "eval_partial.jsonl")
+    completed_sample_keys = set()
+    if resume and os.path.exists(partial_file):
+        valid_pair_keys = {
+            (meta["suite_name"], meta["user_task_id"], meta["injection_task_id"])
+            for meta in metadata
+        }
+        with open(partial_file) as existing_partial:
+            for line_number, line in enumerate(existing_partial, 1):
+                if not line.strip():
+                    continue
+                result = json.loads(line)
+                sample_key = (
+                    result["suite_name"],
+                    result["user_task_id"],
+                    result["injection_task_id"],
+                    int(result["sample_idx"]),
+                )
+                if sample_key[:3] not in valid_pair_keys or not (
+                    0 <= sample_key[3] < num_samples
+                ):
+                    raise ValueError(
+                        f"Sample in {partial_file} does not match this evaluation "
+                        f"at line {line_number}: {sample_key}"
+                    )
+                if sample_key in completed_sample_keys:
+                    raise ValueError(
+                        f"Duplicate sample in {partial_file} at line {line_number}: "
+                        f"{sample_key}"
+                    )
+                completed_sample_keys.add(sample_key)
+                all_results.append(result)
+                add_result_to_aggregates(result)
+        print(f"  Resuming from {len(all_results)} completed samples")
 
     attacker_basename = os.path.basename(attacker_model.rstrip("/"))
     attack_type = f"rl_attacker_{benchmark_slug}_{attacker_basename}"
@@ -442,22 +501,32 @@ def evaluate_agentdojo(
 
     eval_start = time.time()
     futures = []
-    partial_file = os.path.join(output_dir, "eval_partial.jsonl")
     progress_file = os.path.join(output_dir, "eval_progress.json")
-    partial_handle = open(partial_file, "w")
+    partial_handle = open(partial_file, "a" if resume else "w")
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         for task_idx in range(len(metadata)):
             meta = metadata[task_idx]
             for sample_idx, output in enumerate(all_outputs[task_idx]):
+                sample_key = (
+                    meta["suite_name"],
+                    meta["user_task_id"],
+                    meta["injection_task_id"],
+                    sample_idx,
+                )
+                if sample_key in completed_sample_keys:
+                    continue
                 injection_text = extract_injection_text(output, format_prompt)
                 futures.append(
                     executor.submit(eval_single, task_idx, sample_idx, injection_text, meta)
                 )
 
-        completed = 0
-        total_futures = len(futures)
+        completed = len(all_results)
+        total_samples_expected = sum(len(outputs) for outputs in all_outputs)
+        print(
+            f"  Remaining samples: {len(futures)} "
+            f"({completed}/{total_samples_expected} already complete)"
+        )
         for future in as_completed(futures):
-            completed += 1
             try:
                 task_idx, sample_idx, utility, security, injection_text = future.result()
                 meta = metadata[task_idx]
@@ -476,29 +545,10 @@ def evaluate_agentdojo(
                 }
                 all_results.append(result)
                 partial_handle.write(json.dumps(result, ensure_ascii=False) + "\n")
+                add_result_to_aggregates(result)
+                completed += 1
 
-                sn = meta["suite_name"]
-                suite_results[sn]["total"] += 1
-                if attack_success:
-                    suite_results[sn]["success"] += 1
-                if utility:
-                    suite_results[sn]["utility"] += 1
-
-                inj_key = f"{sn}/{meta['injection_task_id']}"
-                injection_task_results[inj_key]["total"] += 1
-                if attack_success:
-                    injection_task_results[inj_key]["success"] += 1
-
-                # Update pass@k tracking
-                pair_key = f"{sn}/{meta['user_task_id']}/{meta['injection_task_id']}"
-                pair_seen.add(pair_key)
-                pair_completed_samples[pair_key] += 1
-                if attack_success:
-                    pair_ever_succeeded[pair_key] = True
-                elif pair_key not in pair_ever_succeeded:
-                    pair_ever_succeeded[pair_key] = False
-
-                if completed % 10 == 0 or completed == total_futures:
+                if completed % 10 == 0 or completed == total_samples_expected:
                     total_samples = max(sum(r["total"] for r in suite_results.values()), 1)
                     total_success_samples = sum(r["success"] for r in suite_results.values())
                     sample_asr = total_success_samples / total_samples
@@ -549,7 +599,7 @@ def evaluate_agentdojo(
                         json.dump(
                             {
                                 "completed_samples": completed,
-                                "total_samples": total_futures,
+                                "total_samples": total_samples_expected,
                                 "sample_asr": sample_asr,
                                 f"pass_at_{num_samples}_running": passk_running,
                                 f"pass_at_{num_samples}": passk_completed,
@@ -564,7 +614,7 @@ def evaluate_agentdojo(
                             indent=2,
                         )
 
-                    print(f"  Progress: {completed}/{total_futures} | "
+                    print(f"  Progress: {completed}/{total_samples_expected} | "
                           f"Sample ASR: {sample_asr:.1%} | "
                           f"Pass@{num_samples}: {passk_running:.1%} "
                           f"({n_pairs_passed}/{n_pairs_seen} pairs)")
@@ -648,6 +698,7 @@ def evaluate_agentdojo(
             "target_model_id": target_model_id,
             "target_model_url": target_model_url,
             "target_adapter": target_adapter,
+            "target_reasoning_effort": target_reasoning_effort,
             "target_temperature": 0 if target_adapter == "secopd" else None,
             "target_enable_thinking": True if target_adapter == "secopd" else None,
             "target_max_tokens": target_max_tokens if target_adapter == "secopd" else None,
@@ -737,6 +788,7 @@ def main():
     parser.add_argument("--num_samples", type=int, default=10)
     parser.add_argument("--injections_cache", default=None)
     parser.add_argument("--generate_only", action="store_true")
+    parser.add_argument("--resume", action="store_true")
 
     # Other
     parser.add_argument("--max_workers", type=int, default=8)
@@ -779,6 +831,7 @@ def main():
         seed=args.seed,
         injections_cache=args.injections_cache,
         generate_only=args.generate_only,
+        resume=args.resume,
     )
 
 

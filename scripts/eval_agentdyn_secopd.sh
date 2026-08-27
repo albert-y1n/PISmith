@@ -28,6 +28,7 @@ TARGET_PORT=${TARGET_PORT:-8010}
 ATTACKER_GPU=${ATTACKER_GPU:-0}
 ATTACKER_PORT=${ATTACKER_PORT:-8011}
 MAX_WORKERS=${MAX_WORKERS:-16}
+RESUME=${RESUME:-true}
 OUTPUT_DIR=${OUTPUT_DIR:-${PROJECT_ROOT}/eval_results/agentdyn_secopd_github-shopping-dailylife_pass10_${RUN_LABEL}}
 INJECTIONS_CACHE=${INJECTIONS_CACHE:-${OUTPUT_DIR}/injections_cache.json}
 
@@ -169,6 +170,10 @@ print("SecOPD input-role/thinking smoke test passed.")
 PY
 
 echo "Starting AgentDyn ${EVAL_SUITES} pass@${NUM_SAMPLES} evaluation..."
+RESUME_ARGS=()
+if [[ "${RESUME}" == "true" ]]; then
+    RESUME_ARGS+=(--resume)
+fi
 "${EVAL_PYTHON}" -u -m eval.eval_agentdyn \
     --attacker_model "${CHECKPOINT}" \
     --target_model local \
@@ -181,6 +186,7 @@ echo "Starting AgentDyn ${EVAL_SUITES} pass@${NUM_SAMPLES} evaluation..."
     --injections_cache "${INJECTIONS_CACHE}" \
     --max_workers "${MAX_WORKERS}" \
     --output_dir "${OUTPUT_DIR}" \
+    "${RESUME_ARGS[@]}" \
     2>&1 | tee "${RUN_LOG}"
 
 echo "Results: ${OUTPUT_DIR}/eval_results.json"

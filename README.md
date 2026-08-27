@@ -174,6 +174,43 @@ bash scripts/eval_injecagent.sh checkpoints/injecagent/checkpoint-500
 
 ---
 
+### [IPI Arena OS](https://github.com/GraySwanAI/ipi_arena_os)
+
+IPI Arena OS contains 41 indirect prompt-injection behaviors across `tool`,
+`coding`, and `browser`. The target model is configurable; the LLM judge and
+WorldSim both default to `gpt-5.6-luna`. GPT-5.6 target, judge, and WorldSim
+requests use `reasoning_effort=medium` by default.
+
+Install Chromium once before running browser behaviors:
+
+```bash
+playwright install chromium
+```
+
+Training:
+
+```bash
+bash scripts/train_ipi_arena_os.sh [target_model] [categories] [train_gpus]
+
+# Example: all 41 behaviors with a GPT-5.6 Luna target
+bash scripts/train_ipi_arena_os.sh gpt-5.6-luna "tool,coding,browser" "0,1,2,3"
+```
+
+Evaluation reports behavior-level ASR@k and sample-level average ASR:
+
+```bash
+bash scripts/eval_ipi_arena_os.sh <checkpoint> [target_model] [categories] [num_samples]
+
+# Example: pass@10 on all categories
+bash scripts/eval_ipi_arena_os.sh checkpoints/ipi_arena_os/checkpoint-500 \
+    gpt-5.6-luna "tool,coding,browser" 10
+```
+
+Use `BEHAVIOR_IDS`, `WAVES`, `TARGET_PROVIDER`, `TARGET_BASE_URL`, and the
+corresponding `JUDGE_*` / `WORLDSIM_*` environment variables for finer control.
+
+---
+
 ## Experiment Results
 
 ### Main Results (vs. Meta-SecAlign-8B, 13 Benchmarks)

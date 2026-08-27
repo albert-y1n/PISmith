@@ -307,7 +307,7 @@ def build_parser() -> argparse.ArgumentParser:
         parser.add_argument(f"--{prefix}_model", default=default_model)
         parser.add_argument(f"--{prefix}_api_key_env", default="OPENAI_API_KEY")
         parser.add_argument(f"--{prefix}_base_url", default=None)
-        parser.add_argument(f"--{prefix}_reasoning_effort", default="none")
+        parser.add_argument(f"--{prefix}_reasoning_effort", default="medium")
 
     parser.add_argument("--num_samples", type=int, default=10)
     parser.add_argument("--max_tokens", type=int, default=4096)

@@ -27,6 +27,9 @@ AGENTDOJO_MODEL_ALIASES = {
     "gpt-5-nano": "gpt-5-nano",
 }
 
+GPT_5_6_MODELS = {"gpt-5.6-luna", "gpt-5.6-terra"}
+GPT_5_6_REASONING_EFFORT = "medium"
+
 
 def _completion_text(c):
     """Normalize TRL completion to string."""
@@ -38,6 +41,22 @@ def _completion_text(c):
 def _resolve_agentdojo_model(target_model: str) -> str:
     """Resolve short model names to exact AgentDojo ModelsEnum values."""
     return AGENTDOJO_MODEL_ALIASES.get(target_model, target_model)
+
+
+def _build_agentdojo_llm(target_model: str):
+    """Build GPT-5.6 targets explicitly so reasoning settings are reproducible."""
+    resolved_model = _resolve_agentdojo_model(target_model)
+    if resolved_model not in GPT_5_6_MODELS:
+        return resolved_model
+
+    from openai import OpenAI
+    from agentdojo.agent_pipeline.llms.openai_llm import OpenAILLM
+
+    return OpenAILLM(
+        OpenAI(),
+        resolved_model,
+        reasoning_effort=GPT_5_6_REASONING_EFFORT,
+    )
 
 
 def extract_injection_text(completion: str, format_prompt: bool = True) -> str:
@@ -125,6 +144,7 @@ class AgentDojoAttackReward:
         # Set up environment variables for local models if needed
         target_model_raw = getattr(config, "target_model", "gpt-4o-mini-2024-07-18")
         target_model = _resolve_agentdojo_model(target_model_raw)
+        target_llm = _build_agentdojo_llm(target_model)
         target_model_id = getattr(config, "target_model_id", None)
         target_model_url = getattr(config, "target_model_url", None)
 
@@ -135,6 +155,8 @@ class AgentDojoAttackReward:
 
         print(f"\nCreating {self.benchmark_name} target pipeline...")
         print(f"  Target model: {target_model}")
+        if target_model in GPT_5_6_MODELS:
+            print(f"  Reasoning effort: {GPT_5_6_REASONING_EFFORT}")
         if target_model_id:
             print(f"  Model ID: {target_model_id}")
         if target_model_url:
@@ -145,7 +167,7 @@ class AgentDojoAttackReward:
             print(f"  Defense: {target_defense}")
 
         self.pipeline_config = PipelineConfig(
-            llm=target_model,
+            llm=target_llm,
             model_id=target_model_id,
             defense=target_defense,
             system_message_name=None,

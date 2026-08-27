@@ -6,7 +6,7 @@
 #   bash scripts/train_agentdyn.sh [target_type] [suites] [train_gpus]
 #
 # target_type:
-#   gpt4o-mini | gpt4o | gpt5-nano | local
+#   gpt4o-mini | gpt4o | gpt5-nano | gpt5.6-luna | gpt5.6-terra | local
 #
 # suites:
 #   workspace | github | dailylife | shopping | all | comma-separated suites
@@ -39,6 +39,12 @@ TRAIN_USER=${TRAIN_USER:-}
 EVAL_USER=${EVAL_USER:-}
 RESUME_FROM_CHECKPOINT=${RESUME_FROM_CHECKPOINT:-}
 
+# Optional training overrides. When unset, values come from configs/agentdyn.yaml.
+LEARNING_RATE=${LEARNING_RATE:-}
+NUM_TRAIN_EPOCHS=${NUM_TRAIN_EPOCHS:-}
+SAVE_STEPS=${SAVE_STEPS:-}
+SAVE_TOTAL_LIMIT=${SAVE_TOTAL_LIMIT:-}
+
 ACCEL_CONFIG="configs/accelerate.yaml"
 NUM_GPUS=$(echo "$TRAIN_GPUS" | tr ',' '\n' | wc -l)
 
@@ -66,6 +72,18 @@ case "$TARGET_TYPE" in
     TARGET_MODEL_URL=""
     NEEDS_VLLM=0
     ;;
+  gpt5.6-luna|gpt-5.6-luna)
+    TARGET_MODEL="gpt-5.6-luna"
+    TARGET_MODEL_ID=""
+    TARGET_MODEL_URL=""
+    NEEDS_VLLM=0
+    ;;
+  gpt5.6-terra|gpt-5.6-terra)
+    TARGET_MODEL="gpt-5.6-terra"
+    TARGET_MODEL_ID=""
+    TARGET_MODEL_URL=""
+    NEEDS_VLLM=0
+    ;;
   local)
     TARGET_MODEL="local"
     TARGET_MODEL_ID="meta-llama/Llama-3.1-8B-Instruct"
@@ -74,7 +92,7 @@ case "$TARGET_TYPE" in
     ;;
   *)
     echo "Unknown target_type: $TARGET_TYPE"
-    echo "Available: gpt4o-mini, gpt4o, gpt5-nano, local"
+    echo "Available: gpt4o-mini, gpt4o, gpt5-nano, gpt5.6-luna, gpt5.6-terra, local"
     exit 1
     ;;
 esac
@@ -99,6 +117,10 @@ echo "  Run name      : $RUN_NAME"
 [ -n "$EVAL_INJ" ] && echo "  Eval inj tasks : $EVAL_INJ"
 [ -n "$TRAIN_USER" ] && echo "  Train user tasks: $TRAIN_USER"
 [ -n "$EVAL_USER" ] && echo "  Eval user tasks : $EVAL_USER"
+[ -n "$LEARNING_RATE" ] && echo "  Learning rate : $LEARNING_RATE"
+[ -n "$NUM_TRAIN_EPOCHS" ] && echo "  Epochs        : $NUM_TRAIN_EPOCHS"
+[ -n "$SAVE_STEPS" ] && echo "  Save steps    : $SAVE_STEPS"
+[ -n "$SAVE_TOTAL_LIMIT" ] && echo "  Checkpoint cap: $SAVE_TOTAL_LIMIT"
 echo "  Output dir    : $OUTPUT_DIR"
 echo "============================================================"
 
@@ -131,6 +153,10 @@ EXTRA_ARGS=(
 [ -n "$TRAIN_USER" ] && EXTRA_ARGS+=(--train_user_tasks "$TRAIN_USER")
 [ -n "$EVAL_USER" ] && EXTRA_ARGS+=(--eval_user_tasks "$EVAL_USER")
 [ -n "$RESUME_FROM_CHECKPOINT" ] && EXTRA_ARGS+=(--resume_from_checkpoint "$RESUME_FROM_CHECKPOINT")
+[ -n "$LEARNING_RATE" ] && EXTRA_ARGS+=(--learning_rate "$LEARNING_RATE")
+[ -n "$NUM_TRAIN_EPOCHS" ] && EXTRA_ARGS+=(--num_train_epochs "$NUM_TRAIN_EPOCHS")
+[ -n "$SAVE_STEPS" ] && EXTRA_ARGS+=(--save_steps "$SAVE_STEPS")
+[ -n "$SAVE_TOTAL_LIMIT" ] && EXTRA_ARGS+=(--save_total_limit "$SAVE_TOTAL_LIMIT")
 
 TRAIN_CMD=(
     -m train
