@@ -62,6 +62,42 @@ def test_gpt56_requests_do_not_set_a_completion_cap():
     assert captured["reasoning_effort"] == "medium"
 
 
+def test_openrouter_uses_standard_max_tokens_and_omits_none_reasoning():
+    captured = {}
+
+    def create(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content="done", tool_calls=None)
+                )
+            ],
+            usage=None,
+            model="google/gemini-3.7-flash",
+        )
+
+    client = IPIArenaOSLLMClient(
+        provider="openrouter",
+        model="google/gemini-3.7-flash",
+        api_key="test",
+        reasoning_effort="none",
+    )
+    client.client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+    )
+
+    client.chat(
+        [{"role": "user", "content": "hello"}],
+        temperature=0.2,
+        max_tokens=16,
+    )
+
+    assert captured["max_tokens"] == 16
+    assert captured["temperature"] == 0.2
+    assert "reasoning_effort" not in captured
+
+
 def test_dataset_filters_categories_ids_and_waves():
     dataset = IPIArenaOSDataset(
         categories="tool,coding",

@@ -15,20 +15,20 @@ attacker_model_name_or_path: Qwen/Qwen3-4B-Instruct-2507
 # Target agent
 target_provider: openai
 target_model: gpt-5.6-luna
-target_api_key_env: OPENAI_API_KEY
+# target_api_key_env: null  # inferred from provider
 # target_base_url: null
 target_reasoning_effort: medium
 
 # LLM judge and WorldSim both default to GPT-5.6 Luna.
 judge_provider: openai
 judge_model: gpt-5.6-luna
-judge_api_key_env: OPENAI_API_KEY
+# judge_api_key_env: null  # inferred from provider
 # judge_base_url: null
 judge_reasoning_effort: medium
 
 worldsim_provider: openai
 worldsim_model: gpt-5.6-luna
-worldsim_api_key_env: OPENAI_API_KEY
+# worldsim_api_key_env: null  # inferred from provider
 # worldsim_base_url: null
 worldsim_reasoning_effort: medium
 

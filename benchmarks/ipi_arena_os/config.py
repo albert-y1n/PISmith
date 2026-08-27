@@ -50,19 +50,19 @@ class IPIArenaOSGRPOConfig(GRPOConfig):
 
     target_provider: str = field(default="openai")
     target_model: str = field(default=DEFAULT_LUNA_MODEL)
-    target_api_key_env: str = field(default="OPENAI_API_KEY")
+    target_api_key_env: Optional[str] = field(default=None)
     target_base_url: Optional[str] = field(default=None)
     target_reasoning_effort: Optional[str] = field(default="medium")
 
     judge_provider: str = field(default="openai")
     judge_model: str = field(default=DEFAULT_LUNA_MODEL)
-    judge_api_key_env: str = field(default="OPENAI_API_KEY")
+    judge_api_key_env: Optional[str] = field(default=None)
     judge_base_url: Optional[str] = field(default=None)
     judge_reasoning_effort: Optional[str] = field(default="medium")
 
     worldsim_provider: str = field(default="openai")
     worldsim_model: str = field(default=DEFAULT_LUNA_MODEL)
-    worldsim_api_key_env: str = field(default="OPENAI_API_KEY")
+    worldsim_api_key_env: Optional[str] = field(default=None)
     worldsim_base_url: Optional[str] = field(default=None)
     worldsim_reasoning_effort: Optional[str] = field(default="medium")
 

@@ -94,7 +94,8 @@ bash scripts/eval_piarena.sh checkpoints/piarena_none/checkpoint-500 piguard
 
 ### [AgentDojo](https://github.com/ethz-spylab/agentdojo)
 
-Supports GPT-4o-mini, GPT-4o, GPT-5-nano, and local vLLM targets.
+Supports OpenAI, OpenRouter, and local vLLM targets. OpenRouter uses the
+OpenAI-compatible endpoint and reads credentials from `OPENROUTER_API_KEY`.
 
 ```bash
 bash scripts/train_agentdojo.sh [target_type] [suites] [train_gpus]
@@ -106,6 +107,10 @@ bash scripts/train_agentdojo.sh
 
 # Train on all suites (workspace, banking, travel, slack)
 bash scripts/train_agentdojo.sh gpt4o-mini all
+
+# OpenRouter example: Gemini 3.7 Flash
+export OPENROUTER_API_KEY=<your-key>
+bash scripts/train_agentdojo.sh gemini-3.7-flash workspace "0,1,2,3"
 ```
 
 Evaluation:
@@ -115,6 +120,11 @@ bash scripts/eval_agentdojo.sh <checkpoint> [target_type] [eval_suites] [num_sam
 
 # Example
 bash scripts/eval_agentdojo.sh checkpoints/agentdojo/checkpoint-500 gpt4o-mini
+
+# OpenRouter example
+export OPENROUTER_API_KEY=<your-key>
+bash scripts/eval_agentdojo.sh checkpoints/agentdojo/checkpoint-500 \
+    gemini-3.7-flash workspace 10
 ```
 
 ---
@@ -136,6 +146,10 @@ bash scripts/train_agentdyn.sh [target_type] [suites] [train_gpus]
 
 # Example
 bash scripts/train_agentdyn.sh gpt5-nano github "0,1,2,3"
+
+# OpenRouter example: Gemini 3.7 Flash
+export OPENROUTER_API_KEY=<your-key>
+bash scripts/train_agentdyn.sh gemini-3.7-flash github "0,1,2,3"
 ```
 
 Evaluation reports both pass@k and sample-level average ASR, and supports data-parallel attacker vLLM serving:
@@ -143,6 +157,11 @@ Evaluation reports both pass@k and sample-level average ASR, and supports data-p
 ```bash
 ATTACKER_GPUS=0,1,2,3 ATTACKER_DP_SIZE=4 \
 bash scripts/eval_agentdyn.sh checkpoints/agentdyn/checkpoint-500 gpt5-nano "github,dailylife,shopping" 5
+
+# Use another OpenRouter model by overriding the model slug
+export OPENROUTER_API_KEY=<your-key>
+OPENROUTER_MODEL=google/gemini-3.7-flash \
+bash scripts/eval_agentdyn.sh checkpoints/agentdyn/checkpoint-500 openrouter github 10
 ```
 
 ---
@@ -199,6 +218,13 @@ bash scripts/train_ipi_arena_os.sh [target_model] [categories] [train_gpus]
 
 # Example: all 41 behaviors with a GPT-5.6 Luna target
 bash scripts/train_ipi_arena_os.sh gpt-5.6-luna "tool,coding,browser" "0,1,2,3"
+
+# Use Gemini for target, judge, and WorldSim through OpenRouter
+export OPENROUTER_API_KEY=<your-key>
+JUDGE_MODEL=google/gemini-3.7-flash \
+WORLDSIM_MODEL=google/gemini-3.7-flash \
+bash scripts/train_ipi_arena_os.sh google/gemini-3.7-flash \
+    "tool,coding,browser" "0,1,2,3"
 ```
 
 Evaluation reports behavior-level ASR@k and sample-level average ASR:
@@ -209,10 +235,19 @@ bash scripts/eval_ipi_arena_os.sh <checkpoint> [target_model] [categories] [num_
 # Example: pass@10 on all categories
 bash scripts/eval_ipi_arena_os.sh checkpoints/ipi_arena_os/checkpoint-500 \
     gpt-5.6-luna "tool,coding,browser" 10
+
+# Use Gemini for target, judge, and WorldSim through OpenRouter
+export OPENROUTER_API_KEY=<your-key>
+JUDGE_MODEL=google/gemini-3.7-flash \
+WORLDSIM_MODEL=google/gemini-3.7-flash \
+bash scripts/eval_ipi_arena_os.sh checkpoints/ipi_arena_os/checkpoint-500 \
+    google/gemini-3.7-flash "tool,coding,browser" 10
 ```
 
 Use `BEHAVIOR_IDS`, `WAVES`, `TARGET_PROVIDER`, `TARGET_BASE_URL`, and the
 corresponding `JUDGE_*` / `WORLDSIM_*` environment variables for finer control.
+Optional OpenRouter attribution headers can be configured with
+`OPENROUTER_HTTP_REFERER` and `OPENROUTER_APP_NAME`.
 
 ---
 

@@ -193,6 +193,9 @@ def evaluate_agentdojo(
     benchmark_version: str = "v1.2.2",
     eval_user_tasks: Optional[List[str]] = None,
     eval_injection_tasks: Optional[List[str]] = None,
+    target_provider: str = "openai",
+    target_api_key_env: Optional[str] = None,
+    target_base_url: Optional[str] = None,
     target_model_id: Optional[str] = None,
     target_model_url: Optional[str] = None,
     target_adapter: Optional[str] = None,
@@ -218,12 +221,15 @@ def evaluate_agentdojo(
     """Evaluate attacker model on AgentDojo benchmark."""
     set_random_seed(seed)
     os.makedirs(output_dir, exist_ok=True)
+    if target_model == "local":
+        target_provider = "vllm"
 
     print("=" * 70)
     print(f"{benchmark_label} Evaluation")
     print("=" * 70)
     print(f"  Attacker model: {attacker_model}")
     print(f"  Target model: {target_model}")
+    print(f"  Target provider: {target_provider}")
     if target_model_id:
         print(f"  Target model ID: {target_model_id}")
     if target_defense:
@@ -355,6 +361,9 @@ def evaluate_agentdojo(
     print("\nCreating target pipeline...")
     llm_resolved = _build_agentdojo_llm(
         target_model,
+        target_provider=target_provider,
+        target_api_key_env=target_api_key_env,
+        target_base_url=target_base_url,
         target_model_id=target_model_id,
         target_model_url=target_model_url,
         target_max_tokens=target_max_tokens,
@@ -702,6 +711,9 @@ def evaluate_agentdojo(
         "config": {
             "attacker_model": attacker_model,
             "target_model": target_model,
+            "target_provider": target_provider,
+            "target_api_key_env": target_api_key_env,
+            "target_base_url": target_base_url,
             "target_model_id": target_model_id,
             "target_model_url": target_model_url,
             "target_adapter": target_adapter,
@@ -778,6 +790,9 @@ def main():
 
     # Target model
     parser.add_argument("--target_model", default="gpt-4o-mini-2024-07-18")
+    parser.add_argument("--target_provider", default="openai")
+    parser.add_argument("--target_api_key_env", default=None)
+    parser.add_argument("--target_base_url", default=None)
     parser.add_argument("--target_model_id", default=None)
     parser.add_argument("--target_model_url", default=None)
     parser.add_argument("--target_adapter", choices=["secopd"], default=None)
@@ -825,6 +840,9 @@ def main():
         benchmark_version=args.benchmark_version,
         eval_user_tasks=eval_user_tasks,
         eval_injection_tasks=eval_injection_tasks,
+        target_provider=args.target_provider,
+        target_api_key_env=args.target_api_key_env,
+        target_base_url=args.target_base_url,
         target_model_id=args.target_model_id,
         target_model_url=args.target_model_url,
         target_adapter=args.target_adapter,

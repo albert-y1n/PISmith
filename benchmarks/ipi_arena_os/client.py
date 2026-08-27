@@ -6,15 +6,9 @@ import json
 import os
 from typing import Any, Optional
 
-from openai import OpenAI
 from ipi_arena_bench.llm_client import ChatResponse, ToolCall
 
-
-PROVIDER_BASE_URLS = {
-    "openai": "https://api.openai.com/v1",
-    "openrouter": "https://openrouter.ai/api/v1",
-    "vllm": "http://localhost:8000/v1",
-}
+from core.providers import create_openai_compatible_client, resolve_api_key_env
 
 
 class IPIArenaOSLLMClient:
@@ -28,21 +22,15 @@ class IPIArenaOSLLMClient:
         base_url: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
     ):
-        resolved_url = base_url or PROVIDER_BASE_URLS.get(provider)
-        if not resolved_url:
-            raise ValueError(f"Unknown provider '{provider}'; provide an explicit base URL.")
-        if provider != "vllm" and not api_key:
-            raise ValueError(f"An API key is required for provider '{provider}'.")
-
         self.provider = provider
         self.model = model
         self.reasoning_effort = (
-            None if provider == "vllm" and reasoning_effort == "none" else reasoning_effort
+            None if reasoning_effort in {None, "", "none"} else reasoning_effort
         )
-        self.client = OpenAI(
-            base_url=resolved_url,
-            api_key=api_key or "EMPTY",
-            max_retries=3,
+        self.client = create_openai_compatible_client(
+            provider,
+            api_key=api_key,
+            base_url=base_url,
             timeout=120.0,
         )
 
@@ -117,7 +105,9 @@ class IPIArenaOSLLMClient:
 def build_client(config: Any, prefix: str) -> IPIArenaOSLLMClient:
     provider = getattr(config, f"{prefix}_provider")
     model = getattr(config, f"{prefix}_model")
-    api_key_env = getattr(config, f"{prefix}_api_key_env")
+    api_key_env = resolve_api_key_env(
+        provider, getattr(config, f"{prefix}_api_key_env", None)
+    )
     api_key = None if provider == "vllm" else os.environ.get(api_key_env)
     if provider != "vllm" and not api_key:
         raise ValueError(
@@ -127,8 +117,8 @@ def build_client(config: Any, prefix: str) -> IPIArenaOSLLMClient:
         provider=provider,
         model=model,
         api_key=api_key,
-        base_url=getattr(config, f"{prefix}_base_url"),
-        reasoning_effort=getattr(config, f"{prefix}_reasoning_effort"),
+        base_url=getattr(config, f"{prefix}_base_url", None),
+        reasoning_effort=getattr(config, f"{prefix}_reasoning_effort", None),
     )
 
 

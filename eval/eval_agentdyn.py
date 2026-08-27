@@ -18,6 +18,9 @@ def main():
                         help="vLLM URL for attacker (if externally served)")
 
     parser.add_argument("--target_model", default="gpt-4o-mini-2024-07-18")
+    parser.add_argument("--target_provider", default="openai")
+    parser.add_argument("--target_api_key_env", default=None)
+    parser.add_argument("--target_base_url", default=None)
     parser.add_argument("--target_model_id", default=None)
     parser.add_argument("--target_model_url", default=None)
     parser.add_argument("--target_adapter", choices=["secopd"], default=None)
@@ -62,6 +65,9 @@ def main():
         benchmark_version=args.benchmark_version,
         eval_user_tasks=eval_user_tasks,
         eval_injection_tasks=eval_injection_tasks,
+        target_provider=args.target_provider,
+        target_api_key_env=args.target_api_key_env,
+        target_base_url=args.target_base_url,
         target_model_id=args.target_model_id,
         target_model_url=args.target_model_url,
         target_adapter=args.target_adapter,

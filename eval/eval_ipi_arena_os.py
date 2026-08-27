@@ -305,7 +305,7 @@ def build_parser() -> argparse.ArgumentParser:
     ):
         parser.add_argument(f"--{prefix}_provider", default="openai")
         parser.add_argument(f"--{prefix}_model", default=default_model)
-        parser.add_argument(f"--{prefix}_api_key_env", default="OPENAI_API_KEY")
+        parser.add_argument(f"--{prefix}_api_key_env", default=None)
         parser.add_argument(f"--{prefix}_base_url", default=None)
         parser.add_argument(f"--{prefix}_reasoning_effort", default="medium")
 

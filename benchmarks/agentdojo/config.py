@@ -45,7 +45,21 @@ class AgentDojoGRPOConfig(GRPOConfig):
     # --- Target Model (the agent being attacked) ---
     target_model: str = field(
         default="gpt-4o-mini-2024-07-18",
-        metadata={"help": "Target model for AgentDojo pipeline (ModelsEnum value or 'local')"},
+        metadata={
+            "help": "Target model slug for the configured provider, or 'local'"
+        },
+    )
+    target_provider: str = field(
+        default="openai",
+        metadata={"help": "Target provider: openai, openrouter, or vllm"},
+    )
+    target_api_key_env: Optional[str] = field(
+        default=None,
+        metadata={"help": "API key environment variable; inferred from target_provider"},
+    )
+    target_base_url: Optional[str] = field(
+        default=None,
+        metadata={"help": "Optional OpenAI-compatible target API base URL"},
     )
     target_model_id: Optional[str] = field(
         default=None,

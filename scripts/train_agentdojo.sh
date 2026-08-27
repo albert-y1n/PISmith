@@ -12,7 +12,9 @@
 #   gpt4o-mini   GPT-4o-mini via OpenAI API (default)
 #   gpt4o        GPT-4o via OpenAI API
 #   gpt5-nano    GPT-5-nano via OpenAI API
-#   local        Local vLLM model (needs GPU 0 for vLLM server)
+#   gemini-3.7-flash  Gemini 3.7 Flash via OpenRouter
+#   openrouter    Model from OPENROUTER_MODEL (defaults to Gemini 3.7 Flash)
+#   local         Local vLLM model (needs GPU 0 for vLLM server)
 #
 # suites:
 #   workspace    Single workspace suite (default)
@@ -68,6 +70,10 @@ TRAIN_GPUS=${3:-"0,1,2,3"}
 TARGET_PORT=${TARGET_PORT:-8000}
 TARGET_MAX_MODEL_LEN=${TARGET_MAX_MODEL_LEN:-131072}
 TARGET_MAX_TOKENS=${TARGET_MAX_TOKENS:-32768}
+TARGET_PROVIDER_OVERRIDE=${TARGET_PROVIDER:-}
+TARGET_API_KEY_ENV_OVERRIDE=${TARGET_API_KEY_ENV:-}
+TARGET_BASE_URL=${TARGET_BASE_URL:-}
+OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemini-3.7-flash}
 TARGET_DEFENSE=${TARGET_DEFENSE:-}      # Optional AgentDojo defense: tool_filter, etc.
 
 export OPENAI_API_KEY="${OPENAI_API_KEY:-}"
@@ -92,6 +98,8 @@ fi
 case "$TARGET_TYPE" in
   gpt4o-mini)
     TARGET_MODEL="gpt-4o-mini-2024-07-18"
+    TARGET_PROVIDER=${TARGET_PROVIDER_OVERRIDE:-openai}
+    TARGET_API_KEY_ENV=${TARGET_API_KEY_ENV_OVERRIDE:-OPENAI_API_KEY}
     TARGET_MODEL_ID=""
     TARGET_MODEL_URL=""
     NEEDS_VLLM=0
@@ -99,6 +107,8 @@ case "$TARGET_TYPE" in
     ;;
   gpt4o)
     TARGET_MODEL="gpt-4o-2024-05-13"
+    TARGET_PROVIDER=${TARGET_PROVIDER_OVERRIDE:-openai}
+    TARGET_API_KEY_ENV=${TARGET_API_KEY_ENV_OVERRIDE:-OPENAI_API_KEY}
     TARGET_MODEL_ID=""
     TARGET_MODEL_URL=""
     NEEDS_VLLM=0
@@ -106,13 +116,26 @@ case "$TARGET_TYPE" in
     ;;
   gpt5-nano)
     TARGET_MODEL="gpt-5-nano"
+    TARGET_PROVIDER=${TARGET_PROVIDER_OVERRIDE:-openai}
+    TARGET_API_KEY_ENV=${TARGET_API_KEY_ENV_OVERRIDE:-OPENAI_API_KEY}
     TARGET_MODEL_ID=""
     TARGET_MODEL_URL=""
     NEEDS_VLLM=0
     echo "Target: GPT-5-nano (OpenAI API)"
     ;;
+  gemini-3.7-flash|openrouter)
+    TARGET_MODEL="$OPENROUTER_MODEL"
+    TARGET_PROVIDER=${TARGET_PROVIDER_OVERRIDE:-openrouter}
+    TARGET_API_KEY_ENV=${TARGET_API_KEY_ENV_OVERRIDE:-OPENROUTER_API_KEY}
+    TARGET_MODEL_ID=""
+    TARGET_MODEL_URL=""
+    NEEDS_VLLM=0
+    echo "Target: $TARGET_MODEL (OpenRouter)"
+    ;;
   local)
     TARGET_MODEL="local"
+    TARGET_PROVIDER="vllm"
+    TARGET_API_KEY_ENV=""
     TARGET_MODEL_ID="meta-llama/Llama-3.1-8B-Instruct"
     TARGET_MODEL_URL="http://localhost:${TARGET_PORT}/v1"
     NEEDS_VLLM=1
@@ -120,19 +143,19 @@ case "$TARGET_TYPE" in
     ;;
   *)
     echo "Unknown target_type: $TARGET_TYPE"
-    echo "Available: gpt4o-mini, gpt4o, gpt5-nano, local"
+    echo "Available: gpt4o-mini, gpt4o, gpt5-nano, gemini-3.7-flash, openrouter, local"
     exit 1
     ;;
 esac
 
-if [ "$NEEDS_VLLM" -eq 0 ] && [ -z "${OPENAI_API_KEY:-}" ]; then
-    echo "ERROR: OPENAI_API_KEY is not set but target '$TARGET_TYPE' requires OpenAI API." >&2
-    echo "  Export it before running: export OPENAI_API_KEY=sk-..." >&2
+if [ "$NEEDS_VLLM" -eq 0 ] && [ -z "${!TARGET_API_KEY_ENV:-}" ]; then
+    echo "ERROR: $TARGET_API_KEY_ENV is not set for provider '$TARGET_PROVIDER'." >&2
     exit 1
 fi
 
 echo "============================================================"
 echo "  Target model  : $TARGET_MODEL"
+echo "  Provider      : $TARGET_PROVIDER"
 [ "$NEEDS_VLLM" -eq 1 ] && echo "  Target context/output: $TARGET_MAX_MODEL_LEN / $TARGET_MAX_TOKENS"
 echo "  Suites        : $SUITES"
 echo "  Train GPUs    : $TRAIN_GPUS ($NUM_GPUS GPU(s))"
@@ -163,8 +186,11 @@ fi
 # ── Build CLI overrides ───────────────────────────────────────
 EXTRA_ARGS=(
     --target_model "$TARGET_MODEL"
+    --target_provider "$TARGET_PROVIDER"
     --train_suites "$SUITES"
 )
+[ -n "$TARGET_API_KEY_ENV" ] && EXTRA_ARGS+=(--target_api_key_env "$TARGET_API_KEY_ENV")
+[ -n "$TARGET_BASE_URL" ] && EXTRA_ARGS+=(--target_base_url "$TARGET_BASE_URL")
 [ -n "$TARGET_MODEL_ID"  ] && EXTRA_ARGS+=(--target_model_id  "$TARGET_MODEL_ID")
 [ -n "$TARGET_MODEL_URL" ] && EXTRA_ARGS+=(--target_model_url "$TARGET_MODEL_URL")
 [ "$NEEDS_VLLM" -eq 1 ] && EXTRA_ARGS+=(--target_max_tokens "$TARGET_MAX_TOKENS")
