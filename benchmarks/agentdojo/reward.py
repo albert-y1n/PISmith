@@ -43,9 +43,23 @@ def _resolve_agentdojo_model(target_model: str) -> str:
     return AGENTDOJO_MODEL_ALIASES.get(target_model, target_model)
 
 
-def _build_agentdojo_llm(target_model: str):
-    """Build GPT-5.6 targets explicitly so reasoning settings are reproducible."""
+def _build_agentdojo_llm(
+    target_model: str,
+    *,
+    target_model_id: Optional[str] = None,
+    target_model_url: Optional[str] = None,
+    target_max_tokens: int = 32_768,
+):
+    """Build targets that require explicit reasoning or output settings."""
     resolved_model = _resolve_agentdojo_model(target_model)
+    if resolved_model == "local" and target_model_id and target_model_url:
+        from benchmarks.agentdojo.local import BoundedLocalVLLM
+
+        return BoundedLocalVLLM(
+            target_model_url,
+            target_model_id,
+            max_tokens=target_max_tokens,
+        )
     if resolved_model not in GPT_5_6_MODELS:
         return resolved_model
 
@@ -144,9 +158,15 @@ class AgentDojoAttackReward:
         # Set up environment variables for local models if needed
         target_model_raw = getattr(config, "target_model", "gpt-4o-mini-2024-07-18")
         target_model = _resolve_agentdojo_model(target_model_raw)
-        target_llm = _build_agentdojo_llm(target_model)
         target_model_id = getattr(config, "target_model_id", None)
         target_model_url = getattr(config, "target_model_url", None)
+        target_max_tokens = getattr(config, "target_max_tokens", 32_768)
+        target_llm = _build_agentdojo_llm(
+            target_model,
+            target_model_id=target_model_id,
+            target_model_url=target_model_url,
+            target_max_tokens=target_max_tokens,
+        )
 
         if target_model_id:
             os.environ["AGENTDOJO_VLLM_MODEL"] = target_model_id
@@ -161,6 +181,8 @@ class AgentDojoAttackReward:
             print(f"  Model ID: {target_model_id}")
         if target_model_url:
             print(f"  Model URL: {target_model_url}")
+        if target_model == "local":
+            print(f"  Target max tokens: {target_max_tokens}")
 
         target_defense = getattr(config, "target_defense", None)
         if target_defense:

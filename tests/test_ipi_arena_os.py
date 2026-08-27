@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 from ipi_arena_bench.llm_client import ChatResponse, ToolCall
 
-from benchmarks.ipi_arena_os.client import build_runner
+from benchmarks.ipi_arena_os.client import IPIArenaOSLLMClient, build_runner
 from benchmarks.ipi_arena_os.config import DEFAULT_LUNA_MODEL, IPIArenaOSGRPOConfig
 from benchmarks.ipi_arena_os.dataset import IPIArenaOSDataset
 from benchmarks.ipi_arena_os.reward import IPIArenaOSAttackReward
@@ -26,6 +26,40 @@ def test_luna_is_the_default_judge_and_worldsim():
     config = IPIArenaOSGRPOConfig(output_dir="unused")
     assert config.judge_model == DEFAULT_LUNA_MODEL
     assert config.worldsim_model == DEFAULT_LUNA_MODEL
+
+
+def test_gpt56_requests_do_not_set_a_completion_cap():
+    captured = {}
+
+    def create(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content="done", tool_calls=None)
+                )
+            ],
+            usage=None,
+            model="gpt-5.6-luna",
+        )
+
+    client = IPIArenaOSLLMClient(
+        provider="openai",
+        model="gpt-5.6-luna",
+        api_key="test",
+        reasoning_effort="medium",
+    )
+    client.client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(create=create)
+        )
+    )
+
+    client.chat([{"role": "user", "content": "hello"}], max_tokens=16)
+
+    assert "max_completion_tokens" not in captured
+    assert "max_tokens" not in captured
+    assert captured["reasoning_effort"] == "medium"
 
 
 def test_dataset_filters_categories_ids_and_waves():

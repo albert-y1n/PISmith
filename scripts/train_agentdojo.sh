@@ -66,6 +66,8 @@ SUITES=${2:-workspace}
 TRAIN_GPUS=${3:-"0,1,2,3"}
 
 TARGET_PORT=${TARGET_PORT:-8000}
+TARGET_MAX_MODEL_LEN=${TARGET_MAX_MODEL_LEN:-131072}
+TARGET_MAX_TOKENS=${TARGET_MAX_TOKENS:-32768}
 TARGET_DEFENSE=${TARGET_DEFENSE:-}      # Optional AgentDojo defense: tool_filter, etc.
 
 export OPENAI_API_KEY="${OPENAI_API_KEY:-}"
@@ -131,6 +133,7 @@ fi
 
 echo "============================================================"
 echo "  Target model  : $TARGET_MODEL"
+[ "$NEEDS_VLLM" -eq 1 ] && echo "  Target context/output: $TARGET_MAX_MODEL_LEN / $TARGET_MAX_TOKENS"
 echo "  Suites        : $SUITES"
 echo "  Train GPUs    : $TRAIN_GPUS ($NUM_GPUS GPU(s))"
 [ -n "$TARGET_DEFENSE" ] && echo "  Target defense: $TARGET_DEFENSE"
@@ -145,6 +148,7 @@ echo "============================================================"
 # ── Wait for vLLM if using local target ──────────────────────
 if [ "$NEEDS_VLLM" -eq 1 ]; then
     TARGET_CHECK_URL="http://localhost:${TARGET_PORT}/v1/models"
+    echo "Local target must be served with --max-model-len $TARGET_MAX_MODEL_LEN."
     echo "Waiting for target vLLM at $TARGET_CHECK_URL ..."
     for i in $(seq 1 30); do
         if curl -sf "$TARGET_CHECK_URL" > /dev/null 2>&1; then
@@ -163,6 +167,7 @@ EXTRA_ARGS=(
 )
 [ -n "$TARGET_MODEL_ID"  ] && EXTRA_ARGS+=(--target_model_id  "$TARGET_MODEL_ID")
 [ -n "$TARGET_MODEL_URL" ] && EXTRA_ARGS+=(--target_model_url "$TARGET_MODEL_URL")
+[ "$NEEDS_VLLM" -eq 1 ] && EXTRA_ARGS+=(--target_max_tokens "$TARGET_MAX_TOKENS")
 [ -n "$TARGET_DEFENSE"   ] && EXTRA_ARGS+=(--target_defense   "$TARGET_DEFENSE")
 [ -n "$TRAIN_INJ"   ] && EXTRA_ARGS+=(--train_injection_tasks "$TRAIN_INJ")
 [ -n "$EVAL_SUITES" ] && EXTRA_ARGS+=(--eval_suites           "$EVAL_SUITES")

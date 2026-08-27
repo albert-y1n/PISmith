@@ -55,6 +55,10 @@ class AgentDojoGRPOConfig(GRPOConfig):
         default=None,
         metadata={"help": "vLLM URL for local target models; sets AGENTDOJO_VLLM_URL env var"},
     )
+    target_max_tokens: int = field(
+        default=32_768,
+        metadata={"help": "Maximum output tokens for an ordinary local target response"},
+    )
     target_defense: Optional[str] = field(
         default=None,
         metadata={"help": "Defense method for target pipeline (e.g., 'tool_filter'). None = no defense."},

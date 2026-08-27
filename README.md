@@ -179,7 +179,12 @@ bash scripts/eval_injecagent.sh checkpoints/injecagent/checkpoint-500
 IPI Arena OS contains 41 indirect prompt-injection behaviors across `tool`,
 `coding`, and `browser`. The target model is configurable; the LLM judge and
 WorldSim both default to `gpt-5.6-luna`. GPT-5.6 target, judge, and WorldSim
-requests use `reasoning_effort=medium` by default.
+requests use `reasoning_effort=medium` and do not set a completion-token cap.
+
+AgentDojo/AgentDyn local-target evaluation launchers and the SecOPD launcher use
+a 131,072 token context window and a 32,768 token per-response output cap by
+default. Local-target training uses an external vLLM server: start it with
+`--max-model-len 131072`; PISmith still enforces the 32,768-token response cap.
 
 Install Chromium once before running browser behaviors:
 

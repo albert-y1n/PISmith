@@ -353,10 +353,17 @@ def evaluate_agentdojo(
     # Create the target only after attacker generation/cache loading so two-stage
     # launchers can release attacker GPUs before serving the target.
     print("\nCreating target pipeline...")
-    llm_resolved = _build_agentdojo_llm(target_model)
+    llm_resolved = _build_agentdojo_llm(
+        target_model,
+        target_model_id=target_model_id,
+        target_model_url=target_model_url,
+        target_max_tokens=target_max_tokens,
+    )
     target_reasoning_effort = getattr(llm_resolved, "reasoning_effort", None)
     if target_reasoning_effort:
         print(f"  Target reasoning effort: {target_reasoning_effort}")
+    if target_model == "local":
+        print(f"  Target max_tokens: {target_max_tokens}")
     if target_adapter == "secopd":
         if not target_model_id or not target_model_url:
             raise ValueError(
@@ -701,7 +708,11 @@ def evaluate_agentdojo(
             "target_reasoning_effort": target_reasoning_effort,
             "target_temperature": 0 if target_adapter == "secopd" else None,
             "target_enable_thinking": True if target_adapter == "secopd" else None,
-            "target_max_tokens": target_max_tokens if target_adapter == "secopd" else None,
+            "target_max_tokens": (
+                target_max_tokens
+                if target_adapter == "secopd" or target_model == "local"
+                else None
+            ),
             "target_defense": target_defense,
             "eval_suites": eval_suites,
             "benchmark_version": benchmark_version,

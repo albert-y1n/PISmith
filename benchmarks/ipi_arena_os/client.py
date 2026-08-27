@@ -59,7 +59,11 @@ class IPIArenaOSLLMClient:
         }
 
         if self.provider == "openai":
-            kwargs["max_completion_tokens"] = max_tokens
+            # GPT-5.6 reasoning and visible output share the completion budget.
+            # Leave it unset so target, judge, and WorldSim use the provider's
+            # full model default rather than an evaluation-side cap.
+            if "gpt-5.6" not in self.model:
+                kwargs["max_completion_tokens"] = max_tokens
             if self.reasoning_effort:
                 kwargs["reasoning_effort"] = self.reasoning_effort
         else:

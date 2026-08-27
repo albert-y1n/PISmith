@@ -75,6 +75,8 @@ EVAL_USER=${EVAL_USER:-}  # e.g. "user_task_0,user_task_1"
 
 TARGET_GPU=${TARGET_GPU:-0}
 TARGET_PORT=${TARGET_PORT:-8000}
+TARGET_MAX_MODEL_LEN=${TARGET_MAX_MODEL_LEN:-131072}
+TARGET_MAX_TOKENS=${TARGET_MAX_TOKENS:-32768}
 ATTACKER_GPU=${ATTACKER_GPU:-1}
 ATTACKER_GPUS=${ATTACKER_GPUS:-$ATTACKER_GPU}
 ATTACKER_DP_SIZE=${ATTACKER_DP_SIZE:-1}
@@ -138,7 +140,10 @@ fi
 echo "============================================================"
 echo "  Checkpoint  : $CHECKPOINT"
 echo "  Target      : $TARGET_MODEL"
-[ "$NEEDS_VLLM" -eq 1 ] && echo "  Target GPU  : $TARGET_GPU   port: $TARGET_PORT"
+if [ "$NEEDS_VLLM" -eq 1 ]; then
+    echo "  Target GPU  : $TARGET_GPU   port: $TARGET_PORT"
+    echo "  Target context/output: $TARGET_MAX_MODEL_LEN / $TARGET_MAX_TOKENS"
+fi
 echo "  Attacker GPU(s): $ATTACKER_GPUS port: $ATTACKER_PORT"
 echo "  Attacker DP : $ATTACKER_DP_SIZE"
 echo "  Suites      : $EVAL_SUITES"
@@ -175,7 +180,7 @@ if [ "$NEEDS_VLLM" -eq 1 ]; then
     CUDA_VISIBLE_DEVICES="$TARGET_GPU" python -m vllm.entrypoints.openai.api_server \
         --model "$TARGET_MODEL_ID" \
         --port "$TARGET_PORT" \
-        --max-model-len 8192 \
+        --max-model-len "$TARGET_MAX_MODEL_LEN" \
         --gpu-memory-utilization 0.8 \
         --dtype bfloat16 \
         --trust-remote-code \
@@ -249,6 +254,9 @@ if [ -n "$TARGET_MODEL_ID" ]; then
 fi
 if [ -n "$TARGET_MODEL_URL" ]; then
     TARGET_ARGS="$TARGET_ARGS --target_model_url $TARGET_MODEL_URL"
+fi
+if [ "$NEEDS_VLLM" -eq 1 ]; then
+    TARGET_ARGS="$TARGET_ARGS --target_max_tokens $TARGET_MAX_TOKENS"
 fi
 if [ -n "$TARGET_DEFENSE" ]; then
     TARGET_ARGS="$TARGET_ARGS --target_defense $TARGET_DEFENSE"
