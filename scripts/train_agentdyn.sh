@@ -6,7 +6,8 @@
 #   bash scripts/train_agentdyn.sh [target_type] [suites] [train_gpus]
 #
 # target_type:
-#   gpt4o-mini | gpt4o | gpt5-nano | local
+#   gpt4o-mini | gpt4o | gpt5-nano | gpt5.6-luna | gpt5.6-terra |
+#   gemini-3.7-flash | openrouter | local
 #
 # suites:
 #   workspace | github | dailylife | shopping | all | comma-separated suites
@@ -27,6 +28,12 @@ SUITES=${2:-workspace}
 TRAIN_GPUS=${3:-"0,1,2,3"}
 
 TARGET_PORT=${TARGET_PORT:-8000}
+TARGET_MAX_MODEL_LEN=${TARGET_MAX_MODEL_LEN:-131072}
+TARGET_MAX_TOKENS=${TARGET_MAX_TOKENS:-32768}
+TARGET_PROVIDER_OVERRIDE=${TARGET_PROVIDER:-}
+TARGET_API_KEY_ENV_OVERRIDE=${TARGET_API_KEY_ENV:-}
+TARGET_BASE_URL=${TARGET_BASE_URL:-}
+OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemini-3.7-flash}
 TARGET_DEFENSE=${TARGET_DEFENSE:-}
 ATTACKER_MODEL=${ATTACKER_MODEL:-"Qwen/Qwen3-4B-Instruct-2507"}
 OUTPUT_DIR=${OUTPUT_DIR:-"checkpoints/agentdyn"}
@@ -39,6 +46,12 @@ TRAIN_USER=${TRAIN_USER:-}
 EVAL_USER=${EVAL_USER:-}
 RESUME_FROM_CHECKPOINT=${RESUME_FROM_CHECKPOINT:-}
 
+# Optional training overrides. When unset, values come from configs/agentdyn.yaml.
+LEARNING_RATE=${LEARNING_RATE:-}
+NUM_TRAIN_EPOCHS=${NUM_TRAIN_EPOCHS:-}
+SAVE_STEPS=${SAVE_STEPS:-}
+SAVE_TOTAL_LIMIT=${SAVE_TOTAL_LIMIT:-}
+
 ACCEL_CONFIG="configs/accelerate.yaml"
 NUM_GPUS=$(echo "$TRAIN_GPUS" | tr ',' '\n' | wc -l)
 
@@ -50,38 +63,69 @@ SUITES_TAG=$(echo "$SUITES" | tr ',' '-')
 case "$TARGET_TYPE" in
   gpt4o-mini)
     TARGET_MODEL="gpt-4o-mini-2024-07-18"
+    TARGET_PROVIDER=${TARGET_PROVIDER_OVERRIDE:-openai}
+    TARGET_API_KEY_ENV=${TARGET_API_KEY_ENV_OVERRIDE:-OPENAI_API_KEY}
     TARGET_MODEL_ID=""
     TARGET_MODEL_URL=""
     NEEDS_VLLM=0
     ;;
   gpt4o)
     TARGET_MODEL="gpt-4o-2024-05-13"
+    TARGET_PROVIDER=${TARGET_PROVIDER_OVERRIDE:-openai}
+    TARGET_API_KEY_ENV=${TARGET_API_KEY_ENV_OVERRIDE:-OPENAI_API_KEY}
     TARGET_MODEL_ID=""
     TARGET_MODEL_URL=""
     NEEDS_VLLM=0
     ;;
   gpt5-nano)
     TARGET_MODEL="gpt-5-nano"
+    TARGET_PROVIDER=${TARGET_PROVIDER_OVERRIDE:-openai}
+    TARGET_API_KEY_ENV=${TARGET_API_KEY_ENV_OVERRIDE:-OPENAI_API_KEY}
+    TARGET_MODEL_ID=""
+    TARGET_MODEL_URL=""
+    NEEDS_VLLM=0
+    ;;
+  gpt5.6-luna|gpt-5.6-luna)
+    TARGET_MODEL="gpt-5.6-luna"
+    TARGET_PROVIDER=${TARGET_PROVIDER_OVERRIDE:-openai}
+    TARGET_API_KEY_ENV=${TARGET_API_KEY_ENV_OVERRIDE:-OPENAI_API_KEY}
+    TARGET_MODEL_ID=""
+    TARGET_MODEL_URL=""
+    NEEDS_VLLM=0
+    ;;
+  gpt5.6-terra|gpt-5.6-terra)
+    TARGET_MODEL="gpt-5.6-terra"
+    TARGET_PROVIDER=${TARGET_PROVIDER_OVERRIDE:-openai}
+    TARGET_API_KEY_ENV=${TARGET_API_KEY_ENV_OVERRIDE:-OPENAI_API_KEY}
+    TARGET_MODEL_ID=""
+    TARGET_MODEL_URL=""
+    NEEDS_VLLM=0
+    ;;
+  gemini-3.7-flash|openrouter)
+    TARGET_MODEL="$OPENROUTER_MODEL"
+    TARGET_PROVIDER=${TARGET_PROVIDER_OVERRIDE:-openrouter}
+    TARGET_API_KEY_ENV=${TARGET_API_KEY_ENV_OVERRIDE:-OPENROUTER_API_KEY}
     TARGET_MODEL_ID=""
     TARGET_MODEL_URL=""
     NEEDS_VLLM=0
     ;;
   local)
     TARGET_MODEL="local"
+    TARGET_PROVIDER="vllm"
+    TARGET_API_KEY_ENV=""
     TARGET_MODEL_ID="meta-llama/Llama-3.1-8B-Instruct"
     TARGET_MODEL_URL="http://localhost:${TARGET_PORT}/v1"
     NEEDS_VLLM=1
     ;;
   *)
     echo "Unknown target_type: $TARGET_TYPE"
-    echo "Available: gpt4o-mini, gpt4o, gpt5-nano, local"
+    echo "Available: gpt4o-mini, gpt4o, gpt5-nano, gpt5.6-luna, gpt5.6-terra, gemini-3.7-flash, openrouter, local"
     exit 1
     ;;
 esac
 
-if [ "$NEEDS_VLLM" -eq 0 ] && [ -z "${OPENAI_API_KEY:-}" ]; then
-    echo "ERROR: OPENAI_API_KEY is not set but target '$TARGET_TYPE' requires OpenAI API." >&2
-    echo "  Export it before running: export OPENAI_API_KEY=sk-..." >&2
+if [ "$NEEDS_VLLM" -eq 0 ] && [ -z "${!TARGET_API_KEY_ENV:-}" ]; then
+    echo "ERROR: $TARGET_API_KEY_ENV is not set for provider '$TARGET_PROVIDER'." >&2
     exit 1
 fi
 
@@ -89,6 +133,8 @@ RUN_NAME=${RUN_NAME:-"agentdyn_${SUITES_TAG}_${TARGET_TYPE}"}
 
 echo "============================================================"
 echo "  Target model  : $TARGET_MODEL"
+echo "  Provider      : $TARGET_PROVIDER"
+[ "$NEEDS_VLLM" -eq 1 ] && echo "  Target context/output: $TARGET_MAX_MODEL_LEN / $TARGET_MAX_TOKENS"
 echo "  Suites        : $SUITES"
 echo "  Train GPUs    : $TRAIN_GPUS ($NUM_GPUS GPU(s))"
 echo "  Attacker      : $ATTACKER_MODEL"
@@ -99,11 +145,16 @@ echo "  Run name      : $RUN_NAME"
 [ -n "$EVAL_INJ" ] && echo "  Eval inj tasks : $EVAL_INJ"
 [ -n "$TRAIN_USER" ] && echo "  Train user tasks: $TRAIN_USER"
 [ -n "$EVAL_USER" ] && echo "  Eval user tasks : $EVAL_USER"
+[ -n "$LEARNING_RATE" ] && echo "  Learning rate : $LEARNING_RATE"
+[ -n "$NUM_TRAIN_EPOCHS" ] && echo "  Epochs        : $NUM_TRAIN_EPOCHS"
+[ -n "$SAVE_STEPS" ] && echo "  Save steps    : $SAVE_STEPS"
+[ -n "$SAVE_TOTAL_LIMIT" ] && echo "  Checkpoint cap: $SAVE_TOTAL_LIMIT"
 echo "  Output dir    : $OUTPUT_DIR"
 echo "============================================================"
 
 if [ "$NEEDS_VLLM" -eq 1 ]; then
     TARGET_CHECK_URL="http://localhost:${TARGET_PORT}/v1/models"
+    echo "Local target must be served with --max-model-len $TARGET_MAX_MODEL_LEN."
     echo "Waiting for target vLLM at $TARGET_CHECK_URL ..."
     for i in $(seq 1 30); do
         if curl -sf "$TARGET_CHECK_URL" > /dev/null 2>&1; then
@@ -117,13 +168,17 @@ fi
 
 EXTRA_ARGS=(
     --target_model "$TARGET_MODEL"
+    --target_provider "$TARGET_PROVIDER"
     --train_suites "$SUITES"
     --attacker_model_name_or_path "$ATTACKER_MODEL"
     --output_dir "$OUTPUT_DIR"
     --run_name "$RUN_NAME"
 )
+[ -n "$TARGET_API_KEY_ENV" ] && EXTRA_ARGS+=(--target_api_key_env "$TARGET_API_KEY_ENV")
+[ -n "$TARGET_BASE_URL" ] && EXTRA_ARGS+=(--target_base_url "$TARGET_BASE_URL")
 [ -n "$TARGET_MODEL_ID" ] && EXTRA_ARGS+=(--target_model_id "$TARGET_MODEL_ID")
 [ -n "$TARGET_MODEL_URL" ] && EXTRA_ARGS+=(--target_model_url "$TARGET_MODEL_URL")
+[ "$NEEDS_VLLM" -eq 1 ] && EXTRA_ARGS+=(--target_max_tokens "$TARGET_MAX_TOKENS")
 [ -n "$TARGET_DEFENSE" ] && EXTRA_ARGS+=(--target_defense "$TARGET_DEFENSE")
 [ -n "$TRAIN_INJ" ] && EXTRA_ARGS+=(--train_injection_tasks "$TRAIN_INJ")
 [ -n "$EVAL_SUITES" ] && EXTRA_ARGS+=(--eval_suites "$EVAL_SUITES")
@@ -131,6 +186,10 @@ EXTRA_ARGS=(
 [ -n "$TRAIN_USER" ] && EXTRA_ARGS+=(--train_user_tasks "$TRAIN_USER")
 [ -n "$EVAL_USER" ] && EXTRA_ARGS+=(--eval_user_tasks "$EVAL_USER")
 [ -n "$RESUME_FROM_CHECKPOINT" ] && EXTRA_ARGS+=(--resume_from_checkpoint "$RESUME_FROM_CHECKPOINT")
+[ -n "$LEARNING_RATE" ] && EXTRA_ARGS+=(--learning_rate "$LEARNING_RATE")
+[ -n "$NUM_TRAIN_EPOCHS" ] && EXTRA_ARGS+=(--num_train_epochs "$NUM_TRAIN_EPOCHS")
+[ -n "$SAVE_STEPS" ] && EXTRA_ARGS+=(--save_steps "$SAVE_STEPS")
+[ -n "$SAVE_TOTAL_LIMIT" ] && EXTRA_ARGS+=(--save_total_limit "$SAVE_TOTAL_LIMIT")
 
 TRAIN_CMD=(
     -m train

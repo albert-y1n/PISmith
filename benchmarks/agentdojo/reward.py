@@ -27,6 +27,9 @@ AGENTDOJO_MODEL_ALIASES = {
     "gpt-5-nano": "gpt-5-nano",
 }
 
+GPT_5_6_MODELS = {"gpt-5.6-luna", "gpt-5.6-terra"}
+GPT_5_6_REASONING_EFFORT = "medium"
+
 
 def _completion_text(c):
     """Normalize TRL completion to string."""
@@ -38,6 +41,70 @@ def _completion_text(c):
 def _resolve_agentdojo_model(target_model: str) -> str:
     """Resolve short model names to exact AgentDojo ModelsEnum values."""
     return AGENTDOJO_MODEL_ALIASES.get(target_model, target_model)
+
+
+def _build_agentdojo_llm(
+    target_model: str,
+    *,
+    target_provider: str = "openai",
+    target_api_key_env: Optional[str] = None,
+    target_base_url: Optional[str] = None,
+    target_model_id: Optional[str] = None,
+    target_model_url: Optional[str] = None,
+    target_max_tokens: int = 32_768,
+):
+    """Build targets that require explicit reasoning or output settings."""
+    resolved_model = _resolve_agentdojo_model(target_model)
+    if resolved_model == "local" and target_model_id and target_model_url:
+        from benchmarks.agentdojo.local import BoundedLocalVLLM
+
+        return BoundedLocalVLLM(
+            target_model_url,
+            target_model_id,
+            max_tokens=target_max_tokens,
+        )
+    if (
+        target_provider == "openai"
+        and target_base_url is None
+        and target_api_key_env is None
+    ):
+        if resolved_model not in GPT_5_6_MODELS:
+            return resolved_model
+
+        from openai import OpenAI
+        from agentdojo.agent_pipeline.llms.openai_llm import OpenAILLM
+
+        llm = OpenAILLM(
+            OpenAI(),
+            resolved_model,
+            reasoning_effort=GPT_5_6_REASONING_EFFORT,
+        )
+        llm.name = resolved_model
+        return llm
+
+    if target_provider not in {"openai", "openrouter"}:
+        raise ValueError(
+            f"Unsupported remote target provider '{target_provider}'; "
+            "use openai, openrouter, or a local target."
+        )
+
+    from agentdojo.agent_pipeline.llms.openai_llm import OpenAILLM
+    from core.providers import create_openai_compatible_client
+
+    reasoning_effort = (
+        GPT_5_6_REASONING_EFFORT if resolved_model in GPT_5_6_MODELS else None
+    )
+    llm = OpenAILLM(
+        create_openai_compatible_client(
+            target_provider,
+            api_key_env=target_api_key_env,
+            base_url=target_base_url,
+        ),
+        resolved_model,
+        reasoning_effort=reasoning_effort,
+    )
+    llm.name = resolved_model
+    return llm
 
 
 def extract_injection_text(completion: str, format_prompt: bool = True) -> str:
@@ -125,8 +192,23 @@ class AgentDojoAttackReward:
         # Set up environment variables for local models if needed
         target_model_raw = getattr(config, "target_model", "gpt-4o-mini-2024-07-18")
         target_model = _resolve_agentdojo_model(target_model_raw)
+        target_provider = getattr(config, "target_provider", "openai")
+        if target_model == "local":
+            target_provider = "vllm"
+        target_api_key_env = getattr(config, "target_api_key_env", None)
+        target_base_url = getattr(config, "target_base_url", None)
         target_model_id = getattr(config, "target_model_id", None)
         target_model_url = getattr(config, "target_model_url", None)
+        target_max_tokens = getattr(config, "target_max_tokens", 32_768)
+        target_llm = _build_agentdojo_llm(
+            target_model,
+            target_provider=target_provider,
+            target_api_key_env=target_api_key_env,
+            target_base_url=target_base_url,
+            target_model_id=target_model_id,
+            target_model_url=target_model_url,
+            target_max_tokens=target_max_tokens,
+        )
 
         if target_model_id:
             os.environ["AGENTDOJO_VLLM_MODEL"] = target_model_id
@@ -135,17 +217,22 @@ class AgentDojoAttackReward:
 
         print(f"\nCreating {self.benchmark_name} target pipeline...")
         print(f"  Target model: {target_model}")
+        print(f"  Target provider: {target_provider}")
+        if target_model in GPT_5_6_MODELS:
+            print(f"  Reasoning effort: {GPT_5_6_REASONING_EFFORT}")
         if target_model_id:
             print(f"  Model ID: {target_model_id}")
         if target_model_url:
             print(f"  Model URL: {target_model_url}")
+        if target_model == "local":
+            print(f"  Target max tokens: {target_max_tokens}")
 
         target_defense = getattr(config, "target_defense", None)
         if target_defense:
             print(f"  Defense: {target_defense}")
 
         self.pipeline_config = PipelineConfig(
-            llm=target_model,
+            llm=target_llm,
             model_id=target_model_id,
             defense=target_defense,
             system_message_name=None,

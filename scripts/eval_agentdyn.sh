@@ -7,7 +7,8 @@
 #       <checkpoint> [target_type] [eval_suites] [num_samples] [target_defense]
 #
 # target_type:
-#   gpt4o-mini | gpt4o | gpt5-nano | local
+#   gpt4o-mini | gpt4o | gpt5-nano | gpt5.6-luna | gpt5.6-terra |
+#   gemini-3.7-flash | openrouter | local
 #
 # Env vars:
 #   TARGET_GPU       GPU index for target vLLM server (default: 0, only for local target)
@@ -17,6 +18,7 @@
 #   ATTACKER_DP_SIZE Data parallel replicas for attacker vLLM server (default: 1)
 #   ATTACKER_PORT    Port for attacker vLLM server (default: 8001)
 #   ATTACKER_URL     Use external attacker vLLM server (skips launching a new one)
+#   MAX_WORKERS      Concurrent target evaluations (default: 16)
 # ============================================================
 
 set -euo pipefail
@@ -32,7 +34,8 @@ export OPENAI_API_KEY="${OPENAI_API_KEY:-}"
 CHECKPOINT=${1:-"checkpoints/agentdyn/checkpoint-"}
 TARGET_TYPE=${2:-gpt4o-mini}
 EVAL_SUITES=${3:-"github,dailylife,shopping"}
-NUM_SAMPLES=${4:-5}
+NUM_SAMPLES=${4:-10}
+ATTACKER_MAX_TOKENS=${ATTACKER_MAX_TOKENS:-4096}
 TARGET_DEFENSE=${5:-}
 
 EVAL_INJ=${EVAL_INJ:-}
@@ -40,10 +43,17 @@ EVAL_USER=${EVAL_USER:-}
 
 TARGET_GPU=${TARGET_GPU:-0}
 TARGET_PORT=${TARGET_PORT:-8000}
+TARGET_MAX_MODEL_LEN=${TARGET_MAX_MODEL_LEN:-131072}
+TARGET_MAX_TOKENS=${TARGET_MAX_TOKENS:-32768}
+TARGET_PROVIDER_OVERRIDE=${TARGET_PROVIDER:-}
+TARGET_API_KEY_ENV_OVERRIDE=${TARGET_API_KEY_ENV:-}
+TARGET_BASE_URL=${TARGET_BASE_URL:-}
+OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemini-3.7-flash}
 ATTACKER_GPU=${ATTACKER_GPU:-1}
 ATTACKER_GPUS=${ATTACKER_GPUS:-$ATTACKER_GPU}
 ATTACKER_DP_SIZE=${ATTACKER_DP_SIZE:-1}
 ATTACKER_PORT=${ATTACKER_PORT:-8001}
+MAX_WORKERS=${MAX_WORKERS:-16}
 VLLM_TARGET_PID=""
 VLLM_ATTACKER_PID=""
 
@@ -54,49 +64,85 @@ OUTPUT_DIR=${OUTPUT_DIR:-"eval_results/agentdyn_${TARGET_TYPE}_${SUITES_TAG}_pas
 case "$TARGET_TYPE" in
   gpt4o-mini)
     TARGET_MODEL="gpt-4o-mini-2024-07-18"
+    TARGET_PROVIDER=${TARGET_PROVIDER_OVERRIDE:-openai}
+    TARGET_API_KEY_ENV=${TARGET_API_KEY_ENV_OVERRIDE:-OPENAI_API_KEY}
     TARGET_MODEL_ID=""
     TARGET_MODEL_URL=""
     NEEDS_VLLM=0
     ;;
   gpt4o)
     TARGET_MODEL="gpt-4o-2024-05-13"
+    TARGET_PROVIDER=${TARGET_PROVIDER_OVERRIDE:-openai}
+    TARGET_API_KEY_ENV=${TARGET_API_KEY_ENV_OVERRIDE:-OPENAI_API_KEY}
     TARGET_MODEL_ID=""
     TARGET_MODEL_URL=""
     NEEDS_VLLM=0
     ;;
   gpt5-nano)
     TARGET_MODEL="gpt-5-nano"
+    TARGET_PROVIDER=${TARGET_PROVIDER_OVERRIDE:-openai}
+    TARGET_API_KEY_ENV=${TARGET_API_KEY_ENV_OVERRIDE:-OPENAI_API_KEY}
+    TARGET_MODEL_ID=""
+    TARGET_MODEL_URL=""
+    NEEDS_VLLM=0
+    ;;
+  gpt5.6-luna|gpt-5.6-luna)
+    TARGET_MODEL="gpt-5.6-luna"
+    TARGET_PROVIDER=${TARGET_PROVIDER_OVERRIDE:-openai}
+    TARGET_API_KEY_ENV=${TARGET_API_KEY_ENV_OVERRIDE:-OPENAI_API_KEY}
+    TARGET_MODEL_ID=""
+    TARGET_MODEL_URL=""
+    NEEDS_VLLM=0
+    ;;
+  gpt5.6-terra|gpt-5.6-terra)
+    TARGET_MODEL="gpt-5.6-terra"
+    TARGET_PROVIDER=${TARGET_PROVIDER_OVERRIDE:-openai}
+    TARGET_API_KEY_ENV=${TARGET_API_KEY_ENV_OVERRIDE:-OPENAI_API_KEY}
+    TARGET_MODEL_ID=""
+    TARGET_MODEL_URL=""
+    NEEDS_VLLM=0
+    ;;
+  gemini-3.7-flash|openrouter)
+    TARGET_MODEL="$OPENROUTER_MODEL"
+    TARGET_PROVIDER=${TARGET_PROVIDER_OVERRIDE:-openrouter}
+    TARGET_API_KEY_ENV=${TARGET_API_KEY_ENV_OVERRIDE:-OPENROUTER_API_KEY}
     TARGET_MODEL_ID=""
     TARGET_MODEL_URL=""
     NEEDS_VLLM=0
     ;;
   local)
     TARGET_MODEL="local"
+    TARGET_PROVIDER="vllm"
+    TARGET_API_KEY_ENV=""
     TARGET_MODEL_ID="meta-llama/Llama-3.1-8B-Instruct"
     TARGET_MODEL_URL="http://localhost:${TARGET_PORT}/v1"
     NEEDS_VLLM=1
     ;;
   *)
     echo "Unknown target_type: $TARGET_TYPE"
-    echo "Available: gpt4o-mini, gpt4o, gpt5-nano, local"
+    echo "Available: gpt4o-mini, gpt4o, gpt5-nano, gpt5.6-luna, gpt5.6-terra, gemini-3.7-flash, openrouter, local"
     exit 1
     ;;
 esac
 
-if [ "$NEEDS_VLLM" -eq 0 ] && [ -z "${OPENAI_API_KEY:-}" ]; then
-    echo "ERROR: OPENAI_API_KEY is not set but target '$TARGET_TYPE' requires OpenAI API." >&2
-    echo "  Export it before running: export OPENAI_API_KEY=sk-..." >&2
+if [ "$NEEDS_VLLM" -eq 0 ] && [ -z "${!TARGET_API_KEY_ENV:-}" ]; then
+    echo "ERROR: $TARGET_API_KEY_ENV is not set for provider '$TARGET_PROVIDER'." >&2
     exit 1
 fi
 
 echo "============================================================"
 echo "  Checkpoint      : $CHECKPOINT"
 echo "  Target          : $TARGET_MODEL"
-[ "$NEEDS_VLLM" -eq 1 ] && echo "  Target GPU      : $TARGET_GPU port: $TARGET_PORT"
+echo "  Provider        : $TARGET_PROVIDER"
+if [ "$NEEDS_VLLM" -eq 1 ]; then
+    echo "  Target GPU      : $TARGET_GPU port: $TARGET_PORT"
+    echo "  Target context/output: $TARGET_MAX_MODEL_LEN / $TARGET_MAX_TOKENS"
+fi
 echo "  Attacker GPU(s) : $ATTACKER_GPUS port: $ATTACKER_PORT"
 echo "  Attacker DP     : $ATTACKER_DP_SIZE"
 echo "  Suites          : $EVAL_SUITES"
 echo "  Pass@k          : $NUM_SAMPLES"
+echo "  Max workers     : $MAX_WORKERS"
 echo "  Defense         : ${TARGET_DEFENSE:-none}"
 [ -n "$EVAL_INJ" ] && echo "  Inj tasks       : $EVAL_INJ"
 [ -n "$EVAL_USER" ] && echo "  User tasks      : $EVAL_USER"
@@ -126,7 +172,7 @@ if [ "$NEEDS_VLLM" -eq 1 ]; then
     CUDA_VISIBLE_DEVICES="$TARGET_GPU" python -m vllm.entrypoints.openai.api_server \
         --model "$TARGET_MODEL_ID" \
         --port "$TARGET_PORT" \
-        --max-model-len 8192 \
+        --max-model-len "$TARGET_MAX_MODEL_LEN" \
         --gpu-memory-utilization 0.8 \
         --dtype bfloat16 \
         --trust-remote-code \
@@ -190,9 +236,12 @@ else
     ATTACKER_ARGS="--attacker_server_url http://localhost:${ATTACKER_PORT}/v1"
 fi
 
-TARGET_ARGS="--target_model $TARGET_MODEL"
+TARGET_ARGS="--target_model $TARGET_MODEL --target_provider $TARGET_PROVIDER"
+[ -n "$TARGET_API_KEY_ENV" ] && TARGET_ARGS="$TARGET_ARGS --target_api_key_env $TARGET_API_KEY_ENV"
+[ -n "$TARGET_BASE_URL" ] && TARGET_ARGS="$TARGET_ARGS --target_base_url $TARGET_BASE_URL"
 [ -n "$TARGET_MODEL_ID" ] && TARGET_ARGS="$TARGET_ARGS --target_model_id $TARGET_MODEL_ID"
 [ -n "$TARGET_MODEL_URL" ] && TARGET_ARGS="$TARGET_ARGS --target_model_url $TARGET_MODEL_URL"
+[ "$NEEDS_VLLM" -eq 1 ] && TARGET_ARGS="$TARGET_ARGS --target_max_tokens $TARGET_MAX_TOKENS"
 [ -n "$TARGET_DEFENSE" ] && TARGET_ARGS="$TARGET_ARGS --target_defense $TARGET_DEFENSE"
 
 FILTER_ARGS=""
@@ -207,7 +256,8 @@ python -m eval.eval_agentdyn \
     $TARGET_ARGS \
     --eval_suites "$EVAL_SUITES" \
     --num_samples "$NUM_SAMPLES" \
-    --max_workers 16 \
+    --max_tokens "$ATTACKER_MAX_TOKENS" \
+    --max_workers "$MAX_WORKERS" \
     --output_dir "$OUTPUT_DIR" \
     $FILTER_ARGS
 

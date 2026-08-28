@@ -16,8 +16,12 @@ attacker_model_name_or_path: Qwen/Qwen3-4B-Instruct-2507
 
 # Target Model (the agent being attacked)
 target_model: gpt-4o-mini
+target_provider: openai    # openai | openrouter | vllm
+# target_api_key_env: null # inferred: OPENAI_API_KEY or OPENROUTER_API_KEY
+# target_base_url: null    # optional OpenAI-compatible endpoint override
 # target_model_id: meta-llama/Llama-3.1-8B-Instruct   # for local vLLM target
 # target_model_url: http://localhost:8000/v1           # for local vLLM target
+target_max_tokens: 32768
 # target_defense: null             # AgentDyn defense method (e.g. 'tool_filter')
 
 # Reward

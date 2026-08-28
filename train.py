@@ -3,7 +3,7 @@
 Unified GRPO Training Script for PISmith
 
 Trains an attacker LLM using Group Relative Policy Optimization (GRPO)
-on one of four benchmarks: PIArena, InjecAgent, AgentDojo, or AgentDyn.
+on PIArena, InjecAgent, AgentDojo, AgentDyn, or IPI Arena OS.
 
 Usage:
     # PIArena
@@ -25,6 +25,11 @@ Usage:
     accelerate launch -m train \\
         --benchmark agentdyn \\
         --config_file configs/agentdyn.yaml
+
+    # IPI Arena OS
+    accelerate launch -m train \\
+        --benchmark ipi_arena_os \\
+        --config_file configs/ipi_arena_os.yaml
 """
 
 import os
@@ -37,7 +42,7 @@ from peft import LoraConfig
 from core.utils import set_random_seed
 
 
-BENCHMARKS = ["piarena", "injecagent", "agentdojo", "agentdyn"]
+BENCHMARKS = ["piarena", "injecagent", "agentdojo", "agentdyn", "ipi_arena_os"]
 
 
 def _pop_benchmark_arg(argv):
@@ -98,6 +103,8 @@ def main():
         _train_agentdojo()
     elif benchmark == "agentdyn":
         _train_agentdyn()
+    elif benchmark == "ipi_arena_os":
+        _train_ipi_arena_os()
 
 
 def _build_peft_config(model_config: ModelConfig):
@@ -448,6 +455,78 @@ def _train_agentdyn():
 
     trainer = _make_trainer(
         grpo_config, reward_functions, train_dataset, peft_config,
+        use_adaptive=getattr(grpo_config, "adaptive", False),
+        eval_dataset=eval_dataset,
+    )
+    trainer.train(resume_from_checkpoint=grpo_config.resume_from_checkpoint)
+    print(f"\nTraining complete. Checkpoints: {grpo_config.output_dir}")
+
+
+def _train_ipi_arena_os():
+    from trl import TrlParser
+    from benchmarks.ipi_arena_os.config import IPIArenaOSGRPOConfig
+    from benchmarks.ipi_arena_os.dataset import IPIArenaOSDataset, parse_csv
+    from benchmarks.ipi_arena_os.reward import IPIArenaOSAttackReward
+
+    parser = TrlParser((IPIArenaOSGRPOConfig, ModelConfig))
+    grpo_config, model_config = parser.parse_args_and_config()
+
+    print("=" * 70)
+    print("IPI Arena OS RL Attacker Training")
+    print("=" * 70)
+    set_random_seed(grpo_config.seed)
+
+    behavior_ids = parse_csv(grpo_config.behavior_ids)
+    waves = [int(value) for value in parse_csv(grpo_config.waves) or []] or None
+    train_dataset = IPIArenaOSDataset(
+        categories=grpo_config.categories,
+        behavior_ids=behavior_ids,
+        waves=waves,
+        behaviors_path=grpo_config.behaviors_path,
+    )
+
+    category_counts = {}
+    for sample in train_dataset.samples:
+        category = sample["category"]
+        category_counts[category] = category_counts.get(category, 0) + 1
+    print(f"Loaded {len(train_dataset)} IPI Arena OS training behaviors")
+    for category, count in sorted(category_counts.items()):
+        print(f"  {category}: {count}")
+
+    eval_dataset = None
+    if any(
+        value is not None
+        for value in (
+            grpo_config.eval_categories,
+            grpo_config.eval_behavior_ids,
+            grpo_config.eval_waves,
+        )
+    ):
+        eval_behavior_ids = parse_csv(grpo_config.eval_behavior_ids)
+        eval_waves = [int(value) for value in parse_csv(grpo_config.eval_waves) or []] or None
+        eval_dataset = IPIArenaOSDataset(
+            categories=grpo_config.eval_categories or grpo_config.categories,
+            behavior_ids=eval_behavior_ids,
+            waves=eval_waves,
+            behaviors_path=grpo_config.behaviors_path,
+        )
+        print(f"Loaded {len(eval_dataset)} IPI Arena OS eval behaviors")
+
+    reward_functions = [IPIArenaOSAttackReward(grpo_config)]
+    peft_config = _build_peft_config(model_config)
+    _apply_model_init_kwargs(grpo_config, model_config)
+
+    print(f"\n  Attacker : {grpo_config.attacker_model_name_or_path}")
+    print(f"  Target   : {grpo_config.target_model} ({grpo_config.target_provider})")
+    print(f"  Judge    : {grpo_config.judge_model} ({grpo_config.judge_provider})")
+    print(f"  WorldSim : {grpo_config.worldsim_model} ({grpo_config.worldsim_provider})")
+    print(f"  Output   : {grpo_config.output_dir}")
+
+    trainer = _make_trainer(
+        grpo_config,
+        reward_functions,
+        train_dataset,
+        peft_config,
         use_adaptive=getattr(grpo_config, "adaptive", False),
         eval_dataset=eval_dataset,
     )
